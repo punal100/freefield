@@ -1,6 +1,7 @@
 {
   "pack": "video-h3-bf16",
   "apps": [
+    "extend-video-bf16",
     "h3-photo-bf16",
     "h3-video-bf16"
   ],
@@ -22,6 +23,7 @@
       "gated": false,
       "license": "MiniMax H3 Community License",
       "used_by": [
+        "extend-video-bf16",
         "h3-photo-bf16",
         "h3-video-bf16"
       ]
@@ -35,6 +37,7 @@
       "gated": false,
       "license": "MiniMax H3 Community License",
       "used_by": [
+        "extend-video-bf16",
         "h3-photo-bf16",
         "h3-video-bf16"
       ]
@@ -48,6 +51,7 @@
       "gated": false,
       "license": "MiniMax H3 Community License",
       "used_by": [
+        "extend-video-bf16",
         "h3-photo-bf16",
         "h3-video-bf16"
       ]
@@ -61,6 +65,7 @@
       "gated": false,
       "license": "MiniMax H3 Community License",
       "used_by": [
+        "extend-video-bf16",
         "h3-photo-bf16",
         "h3-video-bf16"
       ]

@@ -1,0 +1,202 @@
+{
+  "$schema": "../../schema/app.schema.json",
+  "id": "extend-video-bf16",
+  "name": "H3 Extend Video BF16",
+  "section": "video",
+  "summary": "Continues a clip from its last 39 frames of motion context, on the full-base BF16 MiniMax H3, and joins the trimmed continuation after it.",
+  "higgsfield_feature": "Extend Video",
+  "pack": "video-h3-bf16",
+  "status": "draft",
+  "workflow": "workflow.api.json",
+  "source": {
+    "template": "extend-video (video-h3 pack)",
+    "comfyui": "0.42.0",
+    "notes": "Core-node rewrite of extend-video: the last N frames (5/22/39, the H3 17k+5 grid) are anchored at frame 0 with MiniMaxH3AddGuide plus the matching audio tail, instead of a single first frame. The decoded head is sliced off with ImageFromBatch and the audio with TrimAudioDuration before concatenation. No custom nodes."
+  },
+  "inputs": [
+    {
+      "id": "clip",
+      "type": "video",
+      "label": "Clip to extend",
+      "required": true,
+      "help": "The continuation is appended after this clip. Keep it at least 2 seconds.",
+      "bind": [
+        {
+          "node": "ev:clip",
+          "field": "file"
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "textarea",
+      "label": "Prompt",
+      "required": true,
+      "default": "The scene continues naturally: same people, place, light and camera style.",
+      "help": "Describe what happens next. The model already sees the end of the clip.",
+      "bind": [
+        {
+          "node": "ev:i2v",
+          "field": "prompt"
+        }
+      ]
+    },
+    {
+      "id": "duration",
+      "type": "slider",
+      "label": "New part (s)",
+      "min": 2,
+      "max": 10,
+      "step": 1,
+      "default": 5,
+      "help": "Length of the generated clip before the motion context is trimmed; the visible addition is shorter by the context length.",
+      "bind": [
+        {
+          "node": "ev:duration",
+          "field": "value"
+        }
+      ]
+    },
+    {
+      "id": "context",
+      "type": "select",
+      "label": "Motion context",
+      "default": 39,
+      "help": "Frames carried into the new clip as a motion guide. 39 is the community standard; must stay shorter than the new part.",
+      "options": [
+        {
+          "value": 5,
+          "label": "5 frames (0.2 s)"
+        },
+        {
+          "value": 22,
+          "label": "22 frames (0.9 s)"
+        },
+        {
+          "value": 39,
+          "label": "39 frames (1.6 s), recommended"
+        }
+      ],
+      "bind": [
+        {
+          "node": "ev:ctxlen",
+          "field": "value"
+        }
+      ]
+    },
+    {
+      "id": "steps",
+      "type": "slider",
+      "label": "Steps",
+      "min": 8,
+      "max": 50,
+      "step": 1,
+      "default": 50,
+      "help": "Fewer steps run faster and look rougher.",
+      "bind": [
+        {
+          "node": "ev:steps",
+          "field": "value"
+        }
+      ]
+    },
+    {
+      "id": "seed",
+      "type": "seed",
+      "label": "Seed",
+      "default": -1,
+      "help": "-1 picks a random seed",
+      "bind": [
+        {
+          "node": "ev:noise",
+          "field": "noise_seed"
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "node": "ev:save",
+      "type": "video",
+      "label": "Extended video"
+    }
+  ],
+  "models": [
+    {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "file": "diffusion_models/minimax_h3_fl2va_bf16.safetensors",
+      "dir": "diffusion_models",
+      "gb": 66.28,
+      "phase": "denoise",
+      "license": "MiniMax H3 Community License"
+    },
+    {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "file": "text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors",
+      "dir": "text_encoders",
+      "gb": 51.51,
+      "phase": "encode",
+      "license": "MiniMax H3 Community License"
+    },
+    {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "file": "vae/minimax_h3_video_vae_fp16.safetensors",
+      "dir": "vae",
+      "gb": 5.21,
+      "phase": "decode",
+      "license": "MiniMax H3 Community License"
+    },
+    {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "file": "vae/minimax_h3_audio_vae_fp32.safetensors",
+      "dir": "vae",
+      "gb": 0.61,
+      "phase": "decode",
+      "license": "MiniMax H3 Community License"
+    }
+  ],
+  "credits": [
+    "MiniMax H3 (MiniMax H3 Community License)",
+    "Motion-context chaining follows the MiniMax H3 community Extender research (tritant/ComfyUI_MiniMax_H3_Extender, NikoDemon80/ComfyUI-H3-Motion-Context)"
+  ],
+  "notes": "Uses MiniMaxH3AddGuide to anchor a multi-frame clip, which ComfyUI crops to the model's valid 17k+5 clip lengths. The exact start point of the context is the last N frames; starting a context window earlier in the source (and replacing the tail) needs the previous clip's sampled latent, so it is not part of this core-node version.",
+  "test": {
+    "prompt": "the cat stretches and walks out of frame",
+    "duration": 5,
+    "context": 39
+  },
+  "presets": [
+    {
+      "id": "reference-50",
+      "label": "Reference (50 steps, Euler)",
+      "sets": [
+        {
+          "node": "ev:ksampler",
+          "field": "sampler_name",
+          "value": "euler"
+        },
+        {
+          "node": "ev:steps",
+          "field": "value",
+          "value": 50
+        }
+      ]
+    },
+    {
+      "id": "freefield-50",
+      "label": "Freefield native (50 steps, res_multistep)",
+      "sets": [
+        {
+          "node": "ev:ksampler",
+          "field": "sampler_name",
+          "value": "res_multistep"
+        },
+        {
+          "node": "ev:steps",
+          "field": "value",
+          "value": 50
+        }
+      ]
+    }
+  ]
+}

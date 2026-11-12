@@ -1,0 +1,470 @@
+{
+  "ev:clip": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "clip.mp4"
+    },
+    "_meta": {
+      "title": "Clip to extend"
+    }
+  },
+  "ev:parts": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "ev:clip",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Frames, sound, fps"
+    }
+  },
+  "ev:ctxlen": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 39
+    },
+    "_meta": {
+      "title": "Motion context frames"
+    }
+  },
+  "ev:negctx": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "values.a": [
+        "ev:ctxlen",
+        0
+      ],
+      "expression": "-a"
+    },
+    "_meta": {
+      "title": "Context start from end"
+    }
+  },
+  "ev:ctx": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "ev:parts",
+        0
+      ],
+      "batch_index": [
+        "ev:negctx",
+        1
+      ],
+      "length": [
+        "ev:ctxlen",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Last N frames as motion context"
+    }
+  },
+  "ev:size": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "ev:ctx",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Source size"
+    }
+  },
+  "ev:ctxsec": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "values.a": [
+        "ev:ctxlen",
+        0
+      ],
+      "expression": "a / 24"
+    },
+    "_meta": {
+      "title": "Context seconds"
+    }
+  },
+  "ev:ctxnegsec": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "values.a": [
+        "ev:ctxlen",
+        0
+      ],
+      "expression": "-a / 24"
+    },
+    "_meta": {
+      "title": "Context seconds before end"
+    }
+  },
+  "ev:ctxaudio": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "ev:parts",
+        1
+      ],
+      "start_index": [
+        "ev:ctxnegsec",
+        0
+      ],
+      "duration": [
+        "ev:ctxsec",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Last N frames of sound"
+    }
+  },
+  "ev:unet": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "minimax_h3_fl2va_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "MiniMax H3 BF16"
+    }
+  },
+  "ev:clipL": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_bf16.safetensors",
+      "type": "minimax",
+      "device": "cpu"
+    },
+    "_meta": {
+      "title": "Qwen3-VL encoder on CPU"
+    }
+  },
+  "ev:vae": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "Video VAE"
+    }
+  },
+  "ev:avae": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "_meta": {
+      "title": "Audio VAE"
+    }
+  },
+  "ev:duration": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 5
+    },
+    "_meta": {
+      "title": "New part length"
+    }
+  },
+  "ev:frames": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "values.a": [
+        "ev:duration",
+        0
+      ],
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17"
+    },
+    "_meta": {
+      "title": "Frames on the 17k+5 grid"
+    }
+  },
+  "ev:i2v": {
+    "class_type": "MiniMaxH3ImageToVideo",
+    "inputs": {
+      "clip": [
+        "ev:clipL",
+        0
+      ],
+      "vae": [
+        "ev:vae",
+        0
+      ],
+      "width": [
+        "ev:size",
+        0
+      ],
+      "height": [
+        "ev:size",
+        1
+      ],
+      "length": [
+        "ev:frames",
+        1
+      ],
+      "prompt": "The scene continues naturally: same people, place, light and camera style."
+    },
+    "_meta": {
+      "title": "MiniMax H3 continuation"
+    }
+  },
+  "ev:guide": {
+    "class_type": "MiniMaxH3AddGuide",
+    "inputs": {
+      "positive": [
+        "ev:i2v",
+        0
+      ],
+      "vae": [
+        "ev:vae",
+        0
+      ],
+      "audio_vae": [
+        "ev:avae",
+        0
+      ],
+      "latent": [
+        "ev:i2v",
+        1
+      ],
+      "image": [
+        "ev:ctx",
+        0
+      ],
+      "audio": [
+        "ev:ctxaudio",
+        0
+      ],
+      "frame_idx": 0
+    },
+    "_meta": {
+      "title": "Anchor motion context at frame 0"
+    }
+  },
+  "ev:guider": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": [
+        "ev:unet",
+        0
+      ],
+      "conditioning": [
+        "ev:guide",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Guider"
+    }
+  },
+  "ev:noise": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 1
+    },
+    "_meta": {
+      "title": "Noise"
+    }
+  },
+  "ev:ksampler": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "_meta": {
+      "title": "Sampler"
+    }
+  },
+  "ev:steps": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 50
+    },
+    "_meta": {
+      "title": "Steps"
+    }
+  },
+  "ev:sched": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "ev:unet",
+        0
+      ],
+      "steps": [
+        "ev:steps",
+        0
+      ],
+      "scheduler": "simple",
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "Schedule"
+    }
+  },
+  "ev:sample": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "ev:noise",
+        0
+      ],
+      "guider": [
+        "ev:guider",
+        0
+      ],
+      "sampler": [
+        "ev:ksampler",
+        0
+      ],
+      "sigmas": [
+        "ev:sched",
+        0
+      ],
+      "latent_image": [
+        "ev:i2v",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Sample continuation"
+    }
+  },
+  "ev:vdecode": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "ev:sample",
+        0
+      ],
+      "vae": [
+        "ev:vae",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode pictures"
+    }
+  },
+  "ev:trim": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "ev:vdecode",
+        0
+      ],
+      "batch_index": [
+        "ev:ctxlen",
+        0
+      ],
+      "length": 4096
+    },
+    "_meta": {
+      "title": "Drop the regenerated context frames"
+    }
+  },
+  "ev:adecode": {
+    "class_type": "VAEDecodeAudio",
+    "inputs": {
+      "samples": [
+        "ev:sample",
+        0
+      ],
+      "vae": [
+        "ev:avae",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode sound"
+    }
+  },
+  "ev:atrim": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "ev:adecode",
+        0
+      ],
+      "start_index": [
+        "ev:ctxsec",
+        0
+      ],
+      "duration": 600
+    },
+    "_meta": {
+      "title": "Drop the regenerated context sound"
+    }
+  },
+  "ev:images": {
+    "class_type": "ImageBatch",
+    "inputs": {
+      "image1": [
+        "ev:parts",
+        0
+      ],
+      "image2": [
+        "ev:trim",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clip + continuation"
+    }
+  },
+  "ev:sound": {
+    "class_type": "AudioConcat",
+    "inputs": {
+      "audio1": [
+        "ev:parts",
+        1
+      ],
+      "audio2": [
+        "ev:atrim",
+        0
+      ],
+      "direction": "after"
+    },
+    "_meta": {
+      "title": "Sound + new sound"
+    }
+  },
+  "ev:video": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "ev:images",
+        0
+      ],
+      "audio": [
+        "ev:sound",
+        0
+      ],
+      "fps": [
+        "ev:parts",
+        2
+      ],
+      "bit_depth": 8
+    },
+    "_meta": {
+      "title": "Join into one video"
+    }
+  },
+  "ev:save": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "ev:video",
+        0
+      ],
+      "filename_prefix": "freefield/extend-video-bf16",
+      "format": "auto",
+      "format.codec": "auto"
+    },
+    "_meta": {
+      "title": "Extended video"
+    }
+  }
+}
