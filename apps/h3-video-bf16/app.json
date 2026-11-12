@@ -59,6 +59,29 @@
       ]
     },
     {
+      "id": "resolution",
+      "type": "select",
+      "label": "Resolution",
+      "default": 0.98,
+      "help": "Native is the model training size, 1344x768 at 16:9. Fast is the lighter template default.",
+      "options": [
+        {
+          "value": 0.4,
+          "label": "Fast 864x480 (0.4 MP)"
+        },
+        {
+          "value": 0.98,
+          "label": "Native 1344x768 (0.98 MP)"
+        }
+      ],
+      "bind": [
+        {
+          "node": "115",
+          "field": "megapixels"
+        }
+      ]
+    },
+    {
       "id": "duration",
       "type": "slider",
       "label": "Duration (s)",
