@@ -425,86 +425,78 @@
         1
       ],
       "ref_image_size": "match",
-      "ref_images": {
-        "ref_image_0": [
-          "ri0",
-          0
-        ],
-        "ref_image_1": [
-          "ri1",
-          0
-        ],
-        "ref_image_2": [
-          "ri2",
-          0
-        ],
-        "ref_image_3": [
-          "ri3",
-          0
-        ],
-        "ref_image_4": [
-          "ri4",
-          0
-        ],
-        "ref_image_5": [
-          "ri5",
-          0
-        ],
-        "ref_image_6": [
-          "ri6",
-          0
-        ],
-        "ref_image_7": [
-          "ri7",
-          0
-        ],
-        "ref_image_8": [
-          "ri8",
-          0
-        ]
-      },
-      "ref_videos": {
-        "ref_video_0": [
-          "rvc0",
-          0
-        ],
-        "ref_video_1": [
-          "rvc1",
-          0
-        ],
-        "ref_video_2": [
-          "rvc2",
-          0
-        ]
-      },
-      "ref_video_audios": {
-        "ref_video_audio_0": [
-          "rvc0",
-          1
-        ],
-        "ref_video_audio_1": [
-          "rvc1",
-          1
-        ],
-        "ref_video_audio_2": [
-          "rvc2",
-          1
-        ]
-      },
-      "ref_audios": {
-        "ref_audio_0": [
-          "ra0",
-          0
-        ],
-        "ref_audio_1": [
-          "ra1",
-          0
-        ],
-        "ref_audio_2": [
-          "ra2",
-          0
-        ]
-      }
+      "ref_images.ref_image_0": [
+        "ri0",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "ri1",
+        0
+      ],
+      "ref_images.ref_image_2": [
+        "ri2",
+        0
+      ],
+      "ref_images.ref_image_3": [
+        "ri3",
+        0
+      ],
+      "ref_images.ref_image_4": [
+        "ri4",
+        0
+      ],
+      "ref_images.ref_image_5": [
+        "ri5",
+        0
+      ],
+      "ref_images.ref_image_6": [
+        "ri6",
+        0
+      ],
+      "ref_images.ref_image_7": [
+        "ri7",
+        0
+      ],
+      "ref_images.ref_image_8": [
+        "ri8",
+        0
+      ],
+      "ref_videos.ref_video_0": [
+        "rvc0",
+        0
+      ],
+      "ref_videos.ref_video_1": [
+        "rvc1",
+        0
+      ],
+      "ref_videos.ref_video_2": [
+        "rvc2",
+        0
+      ],
+      "ref_video_audios.ref_video_audio_0": [
+        "rvc0",
+        1
+      ],
+      "ref_video_audios.ref_video_audio_1": [
+        "rvc1",
+        1
+      ],
+      "ref_video_audios.ref_video_audio_2": [
+        "rvc2",
+        1
+      ],
+      "ref_audios.ref_audio_0": [
+        "ra0",
+        0
+      ],
+      "ref_audios.ref_audio_1": [
+        "ra1",
+        0
+      ],
+      "ref_audios.ref_audio_2": [
+        "ra2",
+        0
+      ]
     },
     "_meta": {
       "title": "MiniMax H3 Reference to Video"

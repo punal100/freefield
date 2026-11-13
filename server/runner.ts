@@ -153,6 +153,8 @@ function stripRemoved(value: unknown, removed: Set<string>): unknown {
     return value.map((v) => stripRemoved(v, removed)).filter((v) => v !== undefined);
   }
   if (value && typeof value === "object") {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value;   // SDK Asset handles and other class instances
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(value)) {
       const kept = stripRemoved(v, removed);

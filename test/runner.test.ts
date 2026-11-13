@@ -146,11 +146,33 @@ test("multiple reference files bind by index and unused branches are pruned", ()
   assert.ok(wf.json.rvc0, "the used video components node stays");
   assert.ok(wf.json.rv0, "the used video loader stays");
   assert.equal(wf.json.ra0, undefined, "unused audio slot removed");
-  const ref = wf.json["140:131"] as { inputs: Record<string, Record<string, unknown>> };
-  assert.ok(!("ref_image_2" in ref.inputs.ref_images), "no dangling image input");
-  assert.deepEqual(ref.inputs.ref_audios, {}, "no dangling audio input");
-  assert.ok("ref_video_0" in ref.inputs.ref_videos && "ref_video_audio_0" in ref.inputs.ref_video_audios, "video and its soundtrack stay paired");
+  const ref = wf.json["140:131"] as { inputs: Record<string, unknown> };
+  assert.ok(!("ref_images.ref_image_2" in ref.inputs), "no dangling image input");
+  assert.ok(!("ref_audios.ref_audio_0" in ref.inputs), "no dangling audio input");
+  assert.ok("ref_videos.ref_video_0" in ref.inputs && "ref_video_audios.ref_video_audio_0" in ref.inputs, "video and its soundtrack stay paired");
   assert.throws(() => resolveValues(app, { prompt: "x", ref_images: Array.from({ length: 10 }, (_, i) => img(i)) }), /at most 9/);
+});
+
+test("an SDK asset handle survives pruning instead of being cloned into a plain object", () => {
+  const app = byId("h3-reference-bf16");
+  const file = { bytes: new Uint8Array([1]), name: "p.png", type: "image/png" };
+  const values = resolveValues(app, { prompt: "x", ref_images: [file], seed: 1 });
+  class Asset {
+    name: string;
+    constructor(name: string) { this.name = name; }
+  }
+  const asset = new Asset("p.png");
+  const json = structuredClone(app.graph!);
+  const wf = {
+    json,
+    setInput: (node: string, field: string, value: unknown) => {
+      const n = (json[node] ??= { class_type: "", inputs: {} });
+      n.inputs[field] = value;
+    },
+  };
+  applyInputs(app, values, wf, () => asset);
+  const ri0 = json.ri0 as unknown as { inputs: { image: unknown } };
+  assert.equal(ri0.inputs.image, asset, "the class instance is kept as-is, not turned into {}");
 });
 
 test("a select option writes its extra fields (style → LoRA file)", () => {
