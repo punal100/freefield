@@ -64,15 +64,37 @@ function setFile(app, inp, file) {
     return false;
   }
   const f = formFor(app);
-  if (f.files[inp.id]) URL.revokeObjectURL(f.files[inp.id].url);
-  f.files[inp.id] = { file, url: URL.createObjectURL(file) };
+  if (inp.multiple) {
+    const list = f.files[inp.id] ?? (f.files[inp.id] = []);
+    const max = inp.multiple.max ?? 1;
+    if (list.length >= max) {
+      toast(`${inp.label}: at most ${max}`, { error: true });
+      return false;
+    }
+    list.push({ file, url: URL.createObjectURL(file) });
+  } else {
+    if (f.files[inp.id]) URL.revokeObjectURL(f.files[inp.id].url);
+    f.files[inp.id] = { file, url: URL.createObjectURL(file) };
+  }
   dropMasksOf(app, inp.id);
   return true;
 }
-function clearFile(app, id) {
+function clearFile(app, id, index) {
   const f = formFor(app);
-  if (f.files[id]) URL.revokeObjectURL(f.files[id].url);
-  delete f.files[id];
+  const x = f.files[id];
+  if (Array.isArray(x)) {
+    if (index === undefined) {
+      for (const item of x) URL.revokeObjectURL(item.url);
+      delete f.files[id];
+    } else {
+      const [gone] = x.splice(index, 1);
+      if (gone) URL.revokeObjectURL(gone.url);
+      if (!x.length) delete f.files[id];
+    }
+  } else {
+    if (x) URL.revokeObjectURL(x.url);
+    delete f.files[id];
+  }
   dropMasksOf(app, id);
 }
 /** A mask painted over a photo means nothing once the photo changes. */
@@ -84,9 +106,10 @@ function dropMasksOf(app, id) {
 function assignFiles(app, files) {
   const slots = app.inputs.filter((i) => isMedia(i.type) && !i.paint);   // a painted mask is made with the brush, not dropped
   const f = formFor(app);
+  const room = (s) => s.multiple ? (f.files[s.id]?.length ?? 0) < (s.multiple.max ?? 1) : !f.files[s.id];
   let used = 0;
   for (const file of files) {
-    const free = slots.find((s) => fileMatches(s.type, file) && !f.files[s.id]) || slots.find((s) => fileMatches(s.type, file));
+    const free = slots.find((s) => fileMatches(s.type, file) && room(s));
     if (free && setFile(app, free, file)) used++;
   }
   return used;
@@ -104,7 +127,11 @@ function missingInputs(app) {
   const f = formFor(app);
   const out = [];
   for (const inp of app.inputs) {
-    if (isMedia(inp.type)) { if (inp.required && !f.files[inp.id]) out.push(inp); continue; }
+    if (isMedia(inp.type)) {
+      const has = inp.multiple ? Boolean(f.files[inp.id]?.length) : Boolean(f.files[inp.id]);
+      if (inp.required && !has) out.push(inp);
+      continue;
+    }
     if (inp.required && inp.type === "textarea" && !String(f.values[inp.id] ?? "").trim() && !inp.default) out.push(inp);
   }
   return out;
@@ -114,7 +141,12 @@ function buildForm(app, { randomSeed = false } = {}) {
   const f = formFor(app);
   const fd = new FormData();
   for (const inp of app.inputs) {
-    if (isMedia(inp.type)) { const x = f.files[inp.id]; if (x) fd.append(inp.id, x.file, x.file.name); continue; }
+    if (isMedia(inp.type)) {
+      const x = f.files[inp.id];
+      if (inp.multiple) { for (const item of x ?? []) fd.append(inp.id, item.file, item.file.name); }
+      else if (x) fd.append(inp.id, x.file, x.file.name);
+      continue;
+    }
     const v = f.values[inp.id];
     if (inp.type === "toggle") { fd.append(inp.id, v ? "true" : "false"); continue; }
     if (inp.multiple) { fd.append(inp.id, JSON.stringify(Array.isArray(v) ? v : [])); continue; }   // none picked is a choice too
@@ -171,12 +203,15 @@ export async function recreate(item, { run = false } = {}) {
   }
   f.preset = item.preset || "";
   try {
-    await Promise.all(item.inputs.map(async (i) => {
-      const inp = app.inputs.find((x) => x.id === i.id);
-      if (!inp || !i.file) return;
-      const name = i.name || `${i.id}.${extOf(i.file) || "bin"}`;
-      setFile(app, inp, await fileFromUrl(i.file, name));
-    }));
+    for (const inp of app.inputs.filter((i) => isMedia(i.type))) {
+      const entries = item.inputs.filter((i) => i.id === inp.id && i.file);
+      if (!entries.length) continue;
+      clearFile(app, inp.id);
+      for (const i of entries) {
+        const name = i.name || `${i.id}.${extOf(i.file) || "bin"}`;
+        setFile(app, inp, await fileFromUrl(i.file, name));
+      }
+    }
   } catch (err) {
     toast(err.message, { error: true });
   }
@@ -512,8 +547,78 @@ function paintZone(app, inp, rerender) {
   return zone;
 }
 
+const REF_TAG = { image: "Picture", video: "Video", audio: "Audio" };
+
+function multiDropzone(app, inp, rerender) {
+  const f = formFor(app);
+  const list = f.files[inp.id] ?? [];
+  const max = inp.multiple?.max ?? 1;
+  const input = el("input", { type: "file", accept: ACCEPT[inp.type], multiple: true, hidden: true });
+  const add = (files) => {
+    let changed = false;
+    for (const file of files) if (setFile(app, inp, file)) changed = true;
+    if (changed) rerender();
+  };
+  input.addEventListener("change", () => { add([...input.files]); input.value = ""; });
+  const bits = [];
+  bits.push(`up to ${max}`);
+  if (inp.limits?.max_mb) bits.push(t("ws.drop.mb", { mb: inp.limits.max_mb }));
+  if (inp.limits?.seconds) bits.push(t("ws.drop.seconds", { a: inp.limits.seconds[0], b: inp.limits.seconds[1] }));
+  if (inp.limits?.total_seconds) bits.push(`${inp.limits.total_seconds} s total`);
+  if (inp.limits?.total_mb) bits.push(`${inp.limits.total_mb} MB total`);
+  const note = el("small", { class: "faint" }, bits.join(" · "));
+
+  const tile = (x, i) => {
+    const media = inp.type === "image" ? el("img", { src: x.url, alt: "" })
+      : inp.type === "video" ? el("video", { src: x.url, muted: true, loop: true, playsinline: true, autoplay: true, preload: "auto" })
+        : el("audio", { src: x.url, controls: true, preload: "metadata" });
+    if (inp.type === "video") media.muted = true;
+    const warn = el("small", { class: "ref-note" });
+    if (inp.type === "video" && inp.limits?.seconds) {
+      media.addEventListener("loadedmetadata", () => {
+        const [a, b] = inp.limits.seconds;
+        if (media.duration < a - 0.1 || media.duration > b + 0.1) {
+          warn.textContent = `${media.duration.toFixed(1)} s — needs ${a}–${b} s`;
+          warn.classList.add("warn");
+        }
+      });
+    }
+    const move = (to) => {
+      if (to < 0 || to >= list.length) return;
+      const [item] = list.splice(i, 1);
+      list.splice(to, 0, item);
+      rerender();
+    };
+    return el("div", { class: "ref-item", dataset: { slot: inp.id } },
+      el("div", { class: "ref-media" }, media),
+      el("div", { class: "ref-txt" }, el("b", {}, `<${REF_TAG[inp.type]} ${i + 1}>`), el("span", { class: "ref-name" }, x.file.name), warn),
+      el("div", { class: "ref-ctl" },
+        el("button", { class: "mini", type: "button", title: "Move up", "aria-label": "Move up", onclick: () => move(i - 1), disabled: i === 0 }, "↑"),
+        el("button", { class: "mini", type: "button", title: "Move down", "aria-label": "Move down", onclick: () => move(i + 1), disabled: i === list.length - 1 }, "↓"),
+        el("button", { class: "mini", type: "button", title: t("ws.remove"), "aria-label": t("ws.remove"), onclick: () => { clearFile(app, inp.id, i); rerender(); } }, icon("x"))));
+  };
+
+  const zone = el("div", { class: "refset", dataset: { slot: inp.id } },
+    el("span", { class: "lbl" }, inp.label, inp.required ? null : el("small", {}, t("ws.optional"))),
+    ...list.map(tile),
+    list.length < max ? el("button", { class: "ref-add", type: "button", onclick: () => input.click(), "aria-label": t("ws.add", { what: inp.label }) },
+      icon("plus"), el("span", {}, t("ws.add", { what: inp.label }))) : null,
+    el("small", { class: "faint" }, inp.help || "", inp.help ? el("br") : null, note),
+    input);
+  zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("over"); });
+  zone.addEventListener("dragleave", () => zone.classList.remove("over"));
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    zone.classList.remove("over");
+    add([...e.dataTransfer.files]);
+  });
+  return zone;
+}
+
 function dropzone(app, inp, rerender) {
   if (inp.paint) return paintZone(app, inp, rerender);
+  if (inp.multiple) return multiDropzone(app, inp, rerender);
   const f = formFor(app);
   const x = f.files[inp.id];
   const input = el("input", { type: "file", accept: ACCEPT[inp.type], hidden: true });
@@ -537,7 +642,7 @@ function dropzone(app, inp, rerender) {
     if (inp.type === "video" && inp.limits?.seconds) {
       media.addEventListener("loadedmetadata", () => {
         const [a, b] = inp.limits.seconds;
-        if (media.duration < a || media.duration > b) { warn.textContent = `${x.file.name} · ${media.duration.toFixed(1)} s (${a}–${b} s)`; warn.style.color = "var(--warn)"; }
+        if (media.duration < a - 0.1 || media.duration > b + 0.1) { warn.textContent = `${x.file.name} · ${media.duration.toFixed(1)} s (${a}–${b} s)`; warn.style.color = "var(--warn)"; }
       });
     }
     zone = el("div", { class: "drop has", dataset: { slot: inp.id } }, media, warn,
@@ -788,7 +893,14 @@ function vramBars(app) {
 function cliLine(app) {
   const parts = ["npm run app --", app.id];
   for (const inp of app.inputs) {
-    if (isMedia(inp.type)) { if (inp.required) parts.push(`--file ${inp.id}=my-${inp.type}.${inp.type === "image" ? "jpg" : inp.type === "video" ? "mp4" : "mp3"}`); continue; }
+    if (isMedia(inp.type)) {
+      if (inp.required) {
+        const ext = inp.type === "image" ? "jpg" : inp.type === "video" ? "mp4" : "mp3";
+        const n = inp.multiple ? Math.min(2, inp.multiple.max ?? 2) : 1;
+        for (let i = 0; i < n; i++) parts.push(`--file ${inp.id}=my-${inp.type}${n > 1 ? `-${i + 1}` : ""}.${ext}`);
+      }
+      continue;
+    }
     if (inp.required && inp.type === "textarea") parts.push(`--set ${inp.id}="${String(inp.default || "…").slice(0, 40)}"`);
   }
   return parts.join(" ");

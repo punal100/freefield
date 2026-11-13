@@ -1,5 +1,9 @@
 // The waiter: turns form values into a filled workflow using only what app.json says,
 // asks the gateway to clear the GPU when the app's models change, and submits with the Comfy SDK.
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { extname, join } from "node:path";
 import { Comfy } from "@comfyorg/sdk";
 import type { App, Input } from "./registry.ts";
 import { isFileInput, modelKey } from "./registry.ts";
@@ -7,8 +11,9 @@ import { isFileInput, modelKey } from "./registry.ts";
 export type FileValue = { bytes: Uint8Array; name: string; type?: string };
 export type Values = Record<string, unknown>;
 
-/** Anything with setInput, so tests can pass a fake instead of the SDK's Workflow. */
-export type Settable = { setInput(node: string, field: string, value: unknown): unknown };
+/** Anything with setInput, so tests can pass a fake instead of the SDK's Workflow. `json` lets the
+ * runner prune unused reference branches from the raw API graph. */
+export type Settable = { setInput(node: string, field: string, value: unknown): unknown; json?: Record<string, unknown> };
 
 export class InputError extends Error {}
 
@@ -69,14 +74,23 @@ export function joinPicks(input: Input, list: unknown): string {
   return `${m.prefix ?? ""}${items.join(m.join ?? ", ")}${m.suffix ?? ""}`;
 }
 
-/** Values as the workflow gets them: multiple selects joined. */
+/** Values as the workflow gets them: multiple selects joined. Media lists stay lists. */
 export function textValues(app: App, values: Values): Values {
   const out: Values = { ...values };
-  for (const input of app.inputs) if (input.multiple && values[input.id] !== undefined) out[input.id] = joinPicks(input, values[input.id]);
+  for (const input of app.inputs) {
+    if (input.multiple && input.type === "select" && values[input.id] !== undefined) out[input.id] = joinPicks(input, values[input.id]);
+  }
   return out;
 }
 
-/** Fill defaults, coerce types, check required fields. File inputs pass through as FileValue. */
+function checkedFile(input: Input, raw: unknown, where: string): FileValue {
+  if (!isFileValue(raw)) throw new InputError(`${where}: expected a file`);
+  const maxMb = input.limits?.max_mb;
+  if (maxMb && raw.bytes.byteLength > maxMb * 1e6) throw new InputError(`${where}: file is over ${maxMb} MB`);
+  return raw;
+}
+
+/** Fill defaults, coerce types, check required fields. File inputs pass through as FileValue (or FileValue[]). */
 export function resolveValues(app: App, values: Values): Values {
   const out: Values = {};
   for (const input of app.inputs) {
@@ -87,18 +101,32 @@ export function resolveValues(app: App, values: Values): Values {
     if (input.type === "seed" && (v === undefined || v === -1 || v === "-1")) {
       v = Math.floor(Math.random() * 2 ** 48);
     }
-    if (v === undefined) {
-      if (input.required || isFileInput(input)) throw new InputError(`${input.id}: required`);
+    if (isFileInput(input)) {
+      if (v === undefined) {
+        if (input.required) throw new InputError(`${input.id}: required`);
+        continue;
+      }
+      if (input.multiple) {
+        if (!Array.isArray(v) && !isFileValue(v)) throw new InputError(`${input.id}: expected files`);
+        const raw = Array.isArray(v) ? v : [v];
+        if (input.required && !raw.length) throw new InputError(`${input.id}: required`);
+        const max = input.multiple.max;
+        if (max && raw.length > max) throw new InputError(`${input.id}: at most ${max}`);
+        const files = raw.map((f, i) => checkedFile(input, f, `${input.id} file ${i + 1}`));
+        const totalMb = input.limits?.total_mb;
+        const total = files.reduce((n, f) => n + f.bytes.byteLength, 0);
+        if (totalMb && total > totalMb * 1e6) throw new InputError(`${input.id}: the files are over ${totalMb} MB together`);
+        out[input.id] = files;
+      } else {
+        out[input.id] = checkedFile(input, v, input.id);
+      }
       continue;
     }
-    if (isFileInput(input)) {
-      if (!isFileValue(v)) throw new InputError(`${input.id}: expected a file`);
-      const maxMb = input.limits?.max_mb;
-      if (maxMb && v.bytes.byteLength > maxMb * 1e6) throw new InputError(`${input.id}: file is over ${maxMb} MB`);
-      out[input.id] = v;
-    } else {
-      out[input.id] = coerce(input, v);
+    if (v === undefined) {
+      if (input.required) throw new InputError(`${input.id}: required`);
+      continue;
     }
+    out[input.id] = coerce(input, v);
   }
   return out;
 }
@@ -118,6 +146,20 @@ export function setValue(value: unknown, values: Values): unknown {
   return typeof value === "string" && /\{[a-z][a-z0-9_]*\}/.test(value) ? renderTemplate(value, values) : value;
 }
 
+/** Drop whole reference branches (loaders, video components) and the links that pointed at them. */
+function pruneNodes(wf: Settable, removed: Set<string>): void {
+  const json = wf.json;
+  if (!json || !removed.size) return;
+  for (const id of removed) delete json[id];
+  for (const raw of Object.values(json)) {
+    const node = raw as { inputs?: Record<string, unknown> };
+    if (!node.inputs) continue;
+    for (const [field, value] of Object.entries(node.inputs)) {
+      if (Array.isArray(value) && value.length === 2 && typeof value[0] === "string" && removed.has(value[0])) delete node.inputs[field];
+    }
+  }
+}
+
 /**
  * Apply resolved values and an optional preset to a workflow.
  * `asset` turns a FileValue into whatever the workflow expects (an SDK asset handle).
@@ -130,9 +172,24 @@ export function applyInputs(
   presetId?: string,
 ): void {
   values = textValues(app, values);
+  const removed = new Set<string>();
   for (const input of app.inputs) {
     const v = values[input.id];
-    if (v === undefined) continue;
+    if (v === undefined) {
+      if (isFileInput(input) && input.multiple) {
+        for (const b of input.bind ?? []) for (const node of b.branch ?? [b.node]) removed.add(node);
+      }
+      continue;
+    }
+    if (isFileInput(input) && input.multiple) {
+      const files = (Array.isArray(v) ? v : [v]).filter(isFileValue);
+      for (const b of input.bind ?? []) {
+        const index = b.index ?? 0;
+        if (index < files.length) wf.setInput(b.node, b.field, asset(files[index]));
+        else for (const node of b.branch ?? [b.node]) removed.add(node);
+      }
+      continue;
+    }
     for (const b of input.bind ?? []) {
       if (b.template) wf.setInput(b.node, b.field, renderTemplate(b.template, values));
       else wf.setInput(b.node, b.field, isFileValue(v) ? asset(v) : v);
@@ -141,10 +198,113 @@ export function applyInputs(
     const chosen = input.type === "select" ? input.options?.find((o) => o.value === v) : undefined;
     for (const s of chosen?.sets ?? []) wf.setInput(s.node, s.field, setValue(s.value, values));
   }
+  pruneNodes(wf, removed);
   if (presetId) {
     const preset = (app.presets ?? []).find((p) => p.id === presetId);
     if (!preset) throw new InputError(`preset "${presetId}" does not exist in ${app.id}`);
     for (const s of preset.sets) wf.setInput(s.node, s.field, setValue(s.value, values));
+  }
+}
+
+let ffmpegPath: string | null | undefined;
+function ffmpeg(): string {
+  if (ffmpegPath === undefined) {
+    const cmd = process.env.FREEFIELD_FFMPEG || "ffmpeg";
+    try { execFileSync(cmd, ["-version"], { stdio: "ignore" }); ffmpegPath = cmd; } catch { ffmpegPath = null; }
+  }
+  if (!ffmpegPath) throw new InputError("video conversion needs ffmpeg on the server (set FREEFIELD_FFMPEG)");
+  return ffmpegPath;
+}
+
+let ffprobePath: string | null | undefined;
+function ffprobe(): string {
+  if (ffprobePath === undefined) {
+    const cmd = process.env.FREEFIELD_FFPROBE || "ffprobe";
+    try { execFileSync(cmd, ["-version"], { stdio: "ignore" }); ffprobePath = cmd; } catch { ffprobePath = null; }
+  }
+  if (!ffprobePath) throw new InputError("reading a video needs ffprobe on the server (set FREEFIELD_FFPROBE)");
+  return ffprobePath;
+}
+
+function videoExtension(name: string): string {
+  const ext = extname(name).toLowerCase();
+  return /^\.[a-z0-9]{1,8}$/.test(ext) ? ext : ".mp4";
+}
+
+function withTempFile<T>(file: FileValue, fn: (dir: string, input: string) => T): T {
+  const dir = mkdtempSync(join(tmpdir(), "freefield-"));
+  try {
+    const input = join(dir, `input${videoExtension(file.name)}`);
+    writeFileSync(input, file.bytes);
+    return fn(dir, input);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+type VideoProbe = { seconds: number; fps: number; audio: boolean };
+function probeVideo(file: FileValue): VideoProbe {
+  return withTempFile(file, (_dir, input) => {
+    let text: string;
+    try {
+      text = execFileSync(ffprobe(), [
+        "-v", "error", "-show_entries", "format=duration:stream=codec_type,avg_frame_rate", "-of", "json", input,
+      ], { encoding: "utf8", timeout: 120_000 }) as string;
+    } catch (e) {
+      throw new InputError(`${file.name}: could not read the video (${(e as Error).message})`);
+    }
+    let data: { format?: { duration?: string }; streams?: { codec_type?: string; avg_frame_rate?: string }[] };
+    try { data = JSON.parse(text); } catch { throw new InputError(`${file.name}: ffprobe returned unreadable data`); }
+    const seconds = Number(data.format?.duration);
+    if (!Number.isFinite(seconds) || seconds <= 0) throw new InputError(`${file.name}: could not read the video duration`);
+    const video = data.streams?.find((s) => s.codec_type === "video");
+    const [num, den] = String(video?.avg_frame_rate || "0/1").split("/").map(Number);
+    const fps = den ? num / den : num;
+    return { seconds, fps: Number.isFinite(fps) ? fps : 0, audio: Boolean(data.streams?.some((s) => s.codec_type === "audio")) };
+  });
+}
+
+/** 24 fps H.264/AAC, because MiniMaxH3ReferenceToVideo treats the frames it is given as 24 fps. */
+function transcode24(file: FileValue, probe: VideoProbe): FileValue {
+  const bytes = withTempFile(file, (dir, input) => {
+    const output = join(dir, "out.mp4");
+    const args = ["-y", "-v", "error", "-i", input, "-vf", "fps=24", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"];
+    if (probe.audio) args.push("-c:a", "aac", "-b:a", "160k");
+    else args.push("-an");
+    args.push("-movflags", "+faststart", output);
+    try { execFileSync(ffmpeg(), args, { stdio: "ignore", timeout: 300_000 }); }
+    catch (e) { throw new InputError(`${file.name}: 24 fps conversion failed (${(e as Error).message})`); }
+    return readFileSync(output);
+  });
+  const base = file.name.replace(/\.[^.]+$/, "") || "reference";
+  return { bytes: new Uint8Array(bytes), name: `${base}.mp4`, type: "video/mp4" };
+}
+
+/**
+ * Check reference clips and convert them to the 24 fps the H3 reference node expects.
+ * Legacy single-video apps are left alone: their duration was always a UI hint only.
+ */
+export function preflightMedia(app: App, values: Values): void {
+  for (const input of app.inputs) {
+    if (input.type !== "video") continue;
+    const raw = values[input.id];
+    if (raw === undefined) continue;
+    if (!input.multiple && input.preprocess !== "video24") continue;
+    const files = (Array.isArray(raw) ? raw : [raw]).filter(isFileValue);
+    if (!files.length) continue;
+    const [min, max] = input.limits?.seconds ?? [];
+    const EPS = 0.1;
+    let total = 0;
+    for (let i = 0; i < files.length; i++) {
+      const probe = probeVideo(files[i]);
+      if (min !== undefined && probe.seconds < min - EPS) throw new InputError(`${input.id}: ${files[i].name} is ${probe.seconds.toFixed(1)} s; the minimum is ${min} s`);
+      if (max !== undefined && probe.seconds > max + EPS) throw new InputError(`${input.id}: ${files[i].name} is ${probe.seconds.toFixed(1)} s; the maximum is ${max} s`);
+      total += probe.seconds;
+      if (input.preprocess === "video24") files[i] = transcode24(files[i], probe);
+    }
+    const totalMax = input.limits?.total_seconds;
+    if (totalMax && total > totalMax + EPS) throw new InputError(`${input.id}: the clips are ${total.toFixed(1)} s together; the maximum is ${totalMax} s`);
+    values[input.id] = input.multiple ? files : files[0];
   }
 }
 
@@ -236,6 +396,7 @@ export class Runner {
       throw new InputError(`${app.id} is a draft; set FREEFIELD_DRAFTS=1 (or pass --draft) to run it anyway`);
     }
     const values = resolveValues(app, rawValues);
+    preflightMedia(app, values);
     await this.prepare(app);
     const wf = await this.comfy.workflows.fromFile(app.workflowPath);
     applyInputs(

@@ -80,6 +80,17 @@
       "properties": {
         "node": { "type": "string", "description": "Node id in the API workflow, e.g. \"27\" or \"57:27\" inside a subgraph." },
         "field": { "type": "string", "description": "Input name on that node." },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Multiple file inputs only: which uploaded file (0-based) this loader receives."
+        },
+        "branch": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Multiple file inputs only: every node that belongs to this slot. Unused slots are removed before submit, together with the links into them."
+        },
         "template": {
           "type": "string",
           "description": "Optional. Writes this string instead of the raw value; {input_id} placeholders are filled with any input's value."
@@ -132,7 +143,7 @@
         "multiple": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Select only: several options at once (camera moves in a shot, traits of a character). The value is the list of picked option values, in the order picked; templates and binds get them joined: prefix + values joined by join + suffix, or \"\" when none is picked. Its options cannot carry sets.",
+          "description": "Several values for one input. A select gets a list of picked option values, in the order picked; templates and binds get them joined: prefix + values joined by join + suffix, or \"\" when none is picked. Its options cannot carry sets. An image/video/audio input gets an ordered list of files bound by index (0-based); the UI shows them as <Picture 1>, <Video 1>, <Audio 1>.",
           "properties": {
             "max": { "type": "integer", "minimum": 2 },
             "join": { "type": "string", "description": "Between two values. Default \", \"." },
@@ -150,8 +161,14 @@
           "additionalProperties": false,
           "properties": {
             "max_mb": { "type": "number" },
-            "seconds": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
+            "total_mb": { "type": "number" },
+            "seconds": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+            "total_seconds": { "type": "number" }
           }
+        },
+        "preprocess": {
+          "enum": ["video24"],
+          "description": "Video inputs only: transcode to 24 fps H.264/AAC before upload (the H3 reference node expects 24 fps frames)."
         },
         "bind": {
           "type": "array",

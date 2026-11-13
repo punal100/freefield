@@ -4,7 +4,7 @@
 //   npm run app -- <id> [--set k=v] [--file k=path] [--preset id] [--out dir] [--draft]
 import { mkdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { loadRegistry } from "./registry.ts";
+import { isFileInput, loadRegistry } from "./registry.ts";
 import { explainSubmitError, Runner, type Values } from "./runner.ts";
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -50,7 +50,13 @@ if (cmd === "validate") {
     } else if (flag === "--file") {
       const [k, ...v] = arg.split("=");
       const path = v.join("=");
-      values[k] = { bytes: new Uint8Array(readFileSync(path)), name: basename(path) };
+      const file = { bytes: new Uint8Array(readFileSync(path)), name: basename(path) };
+      const input = app.inputs.find((i) => i.id === k);
+      if (input && isFileInput(input) && input.multiple) {
+        const list = (values[k] as typeof file[] | undefined) ?? [];
+        list.push(file);
+        values[k] = list;
+      } else values[k] = file;
     } else if (flag === "--preset") preset = arg;
     else if (flag === "--out") out = arg;
   }

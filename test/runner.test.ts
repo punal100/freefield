@@ -117,6 +117,42 @@ test("file inputs go through the asset function", () => {
   assert.equal(wf.sets["4.text"], "make it night");
 });
 
+test("multiple reference files bind by index and unused branches are pruned", () => {
+  const app = byId("h3-reference-bf16");
+  const img = (n: number) => ({ bytes: new Uint8Array([n]), name: `p${n}.png`, type: "image/png" });
+  const vid = { bytes: new Uint8Array([9]), name: "m.mp4", type: "video/mp4" };
+  const values = resolveValues(app, {
+    prompt: "use <Picture 1> and <Picture 2> with <Video 1>",
+    ref_images: [img(1), img(2)],
+    ref_videos: [vid],
+    seed: 1,
+  });
+  assert.deepEqual((values.ref_images as unknown[]).length, 2, "two ordered image references");
+  assert.deepEqual(values.ref_audios, undefined, "no audio refs is optional");
+  const sets: Record<string, unknown> = {};
+  const wf = {
+    sets,
+    json: structuredClone(app.graph!),
+    setInput: (node: string, field: string, value: unknown) => (sets[`${node}.${field}`] = value),
+  };
+  applyInputs(app, values, wf, (f) => `asset:${f.name}`);
+  assert.equal(sets["ri0.image"], "asset:p1.png");
+  assert.equal(sets["ri1.image"], "asset:p2.png");
+  assert.equal(sets["rv0.file"], "asset:m.mp4");
+  assert.equal(sets["140:131.ref_image_size"], "match");
+  assert.equal(wf.json.ri2, undefined, "unused image slot removed");
+  assert.equal(wf.json.ri8, undefined);
+  assert.equal(wf.json.rv1, undefined, "unused video branch removed");
+  assert.ok(wf.json.rvc0, "the used video components node stays");
+  assert.ok(wf.json.rv0, "the used video loader stays");
+  assert.equal(wf.json.ra0, undefined, "unused audio slot removed");
+  const ref = wf.json["140:131"] as { inputs: Record<string, unknown> };
+  assert.ok(!("ref_image_2" in ref.inputs), "no dangling image input");
+  assert.ok(!("ref_audio_0" in ref.inputs), "no dangling audio input");
+  assert.ok("ref_video_0" in ref.inputs && "ref_video_audio_0" in ref.inputs, "video and its soundtrack stay paired");
+  assert.throws(() => resolveValues(app, { prompt: "x", ref_images: Array.from({ length: 10 }, (_, i) => img(i)) }), /at most 9/);
+});
+
 test("a select option writes its extra fields (style → LoRA file)", () => {
   const app = byId("styles");
   const values = resolveValues(app, { prompt: "a fox", style: "monochrome ink wash style", seed: 1 });

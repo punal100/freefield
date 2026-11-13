@@ -98,6 +98,7 @@ export const HERO = ["effects", "recast", "motion-transfer", "speak", "camera-mo
 /** Prompt-first apps get the floating composer; upload-first apps get the sidebar. */
 export function layoutOf(app) {
   if (app.inputs.some((i) => i.paint)) return "sidebar";   // painting a mask needs the photo in a dropzone
+  if (app.inputs.some((i) => i.multiple && ["image", "video", "audio"].includes(i.type))) return "sidebar";
   const hasText = app.inputs.some((i) => i.type === "textarea");
   return (app.section === "image" || app.section === "audio") && hasText ? "composer" : "sidebar";
 }

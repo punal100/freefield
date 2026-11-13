@@ -30,7 +30,7 @@ export type Entry = {
   total: number | null;
   values: Record<string, unknown>;
   preset: string | null;
-  inputs: { id: string; type: string; file: string; name: string }[];
+  inputs: { id: string; type: string; file: string; name: string; index?: number }[];
   outputs: { file: string; type: string; name: string; node: string }[];
   error: { message: string; class_type?: string | null; node?: string | null } | null;
 };
@@ -225,10 +225,12 @@ export class History {
       const v = values[input.id];
       if (v === undefined) continue;
       if (isFileInput(input)) {
-        const f = v as FileValue;
-        const file = `input-${input.id}${safeExt(f.name, f.type)}`;
-        writeFileSync(join(folder, file), f.bytes);
-        inputs.push({ id: input.id, type: input.type, file, name: f.name || file });
+        const files = (Array.isArray(v) ? v : [v]) as FileValue[];
+        files.forEach((f, i) => {
+          const file = `input-${input.id}${input.multiple ? `-${i + 1}` : ""}${safeExt(f.name, f.type)}`;
+          writeFileSync(join(folder, file), f.bytes);
+          inputs.push({ id: input.id, type: input.type, file, name: f.name || file, ...(input.multiple ? { index: i } : {}) });
+        });
       } else {
         shown[input.id] = v;
       }

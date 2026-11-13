@@ -154,14 +154,20 @@ async function readValues(app: App, request: Request): Promise<{ values: Values;
   const form = await request.formData();
   const values: Values = {};
   for (const input of app.inputs) {
+    if (isFileInput(input)) {
+      const list = form.getAll(input.id);
+      if (!list.length) continue;
+      if (list.some((v) => typeof v === "string")) throw new InputError(`${input.id}: expected a file upload`);
+      const files = await Promise.all(list.map(async (v) => {
+        const f = v as File;
+        return { bytes: new Uint8Array(await f.arrayBuffer()), name: f.name, type: f.type };
+      }));
+      values[input.id] = input.multiple ? files : files[0];
+      continue;
+    }
     const v = form.get(input.id);
     if (v === null) continue;
-    if (isFileInput(input)) {
-      if (typeof v === "string") throw new InputError(`${input.id}: expected a file upload`);
-      values[input.id] = { bytes: new Uint8Array(await v.arrayBuffer()), name: v.name, type: v.type };
-    } else {
-      values[input.id] = v;
-    }
+    values[input.id] = v;
   }
   const preset = form.get("preset");
   return { values, preset: typeof preset === "string" && preset ? preset : undefined };

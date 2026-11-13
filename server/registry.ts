@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Ajv2020 } from "ajv/dist/2020.js";
 
-export type Bind = { node: string; field: string; template?: string };
+export type Bind = { node: string; field: string; template?: string; index?: number; branch?: string[] };
 export type SetField = { node: string; field: string; value: unknown };
 export type Option = { value: unknown; label: string; sets?: SetField[] };
 export type Input = {
@@ -20,11 +20,13 @@ export type Input = {
   step?: number;
   options?: Option[];
   gallery?: boolean;
-  /** selects: several options at once, in the order picked; templates get them joined */
+  /** selects: several options at once, in the order picked; media: an ordered list of files */
   multiple?: { max?: number; join?: string; prefix?: string; suffix?: string; ordered?: boolean };
   /** image inputs: the image input this one is painted over in the web UI (a white-on-black mask) */
   paint?: string;
-  limits?: { max_mb?: number; seconds?: [number, number] };
+  limits?: { max_mb?: number; total_mb?: number; seconds?: [number, number]; total_seconds?: number };
+  /** video inputs: transcode before upload (video24 = 24 fps H.264/AAC for MiniMax H3 references) */
+  preprocess?: "video24";
   bind?: Bind[];
 };
 export type Preset = { id: string; label: string; sets: SetField[] };
@@ -116,6 +118,7 @@ function checkGraph(app: App, problems: Problem[], severity: Problem["severity"]
   for (const input of app.inputs) {
     for (const b of input.bind ?? []) {
       has(b.node, b.field, `input "${input.id}"`);
+      for (const node of b.branch ?? []) if (!g[node]) say(`input "${input.id}": branch node "${node}" is not in ${app.workflow}`);
       if (b.template) checkTemplate(b.template, `input "${input.id}"`);
       if (isFileInput(input) && b.template) say(`input "${input.id}": file inputs cannot use templates`);
       // an optional input with no default is skipped when left empty, and its template with it: the node keeps the
@@ -140,9 +143,28 @@ function checkGraph(app: App, problems: Problem[], severity: Problem["severity"]
     if (input.type !== "image") say(`input "${input.id}": only an image input can be painted (paint)`);
     else if (!src || src.type !== "image" || src === input) say(`input "${input.id}": paint names "${input.paint}", which is not another image input`);
   }
+  for (const input of app.inputs) if (input.preprocess && input.type !== "video") say(`input "${input.id}": preprocess only applies to video inputs`);
   for (const input of app.inputs) {
     if (!input.multiple) continue;
-    if (input.type !== "select") { say(`input "${input.id}": only a select can be multiple`); continue; }
+    if (input.type !== "select" && !isFileInput(input)) {
+      say(`input "${input.id}": only a select or a media input can be multiple`);
+      continue;
+    }
+    if (isFileInput(input)) {
+      const max = input.multiple.max;
+      if (!max) { say(`input "${input.id}": a multiple media input needs multiple.max`); continue; }
+      const byIndex = new Map<number, number>();
+      for (const b of input.bind ?? []) {
+        if (b.index === undefined) { say(`input "${input.id}": every bind of a multiple media input needs an index`); continue; }
+        if (!Number.isInteger(b.index) || b.index < 0 || b.index >= max) {
+          say(`input "${input.id}": bind index ${b.index} is outside 0..${max - 1}`);
+          continue;
+        }
+        byIndex.set(b.index, (byIndex.get(b.index) ?? 0) + 1);
+      }
+      for (let i = 0; i < max; i++) if (!byIndex.has(i)) say(`input "${input.id}": no bind for index ${i}`);
+      continue;
+    }
     if ((input.options ?? []).some((o) => o.sets?.length)) say(`input "${input.id}": the options of a multiple select cannot carry sets`);
     if (input.gallery) say(`input "${input.id}": a multiple select cannot be a gallery`);
     const values = new Set((input.options ?? []).map((o) => String(o.value)));

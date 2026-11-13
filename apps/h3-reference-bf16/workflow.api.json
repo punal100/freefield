@@ -1,0 +1,505 @@
+{
+  "92": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "140:130",
+        0
+      ],
+      "filename_prefix": "freefield/h3-video",
+      "format": "auto",
+      "format.codec": "auto"
+    },
+    "_meta": {
+      "title": "Save Video"
+    }
+  },
+  "115": {
+    "class_type": "ResolutionSelector",
+    "inputs": {
+      "aspect_ratio": "16:9 (Widescreen)",
+      "megapixels": 0.98,
+      "multiple": 32
+    },
+    "_meta": {
+      "title": "Resolution Selector"
+    }
+  },
+  "140:119": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "140:120": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "140:121": {
+    "class_type": "VAEDecodeAudio",
+    "inputs": {
+      "samples": [
+        "140:125",
+        0
+      ],
+      "vae": [
+        "140:120",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VAE Decode Audio"
+    }
+  },
+  "140:122": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "140:125",
+        0
+      ],
+      "vae": [
+        "140:119",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "140:123": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "140:124": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "140:127",
+        0
+      ],
+      "steps": [
+        "140:137",
+        0
+      ],
+      "scheduler": "simple",
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "BasicScheduler"
+    }
+  },
+  "140:125": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "140:129",
+        0
+      ],
+      "guider": [
+        "140:126",
+        0
+      ],
+      "sampler": [
+        "140:123",
+        0
+      ],
+      "sigmas": [
+        "140:124",
+        0
+      ],
+      "latent_image": [
+        "140:131",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "140:126": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": [
+        "140:127",
+        0
+      ],
+      "conditioning": [
+        "140:131",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Basic Guider"
+    }
+  },
+  "140:127": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "minimax_h3_fl2va_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "140:128": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_bf16.safetensors",
+      "type": "minimax",
+      "device": "cpu"
+    },
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "140:129": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 1
+    },
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "140:130": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "140:122",
+        0
+      ],
+      "audio": [
+        "140:121",
+        0
+      ],
+      "fps": 24,
+      "bit_depth": 8
+    },
+    "_meta": {
+      "title": "Create Video"
+    }
+  },
+  "140:132": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "values.a": [
+        "140:133",
+        0
+      ],
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17"
+    },
+    "_meta": {
+      "title": "Math Expression"
+    }
+  },
+  "140:133": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 5
+    },
+    "_meta": {
+      "title": "Float (duration)"
+    }
+  },
+  "140:137": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 50
+    },
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "ri0": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    },
+    "_meta": {
+      "title": "Reference image 1"
+    }
+  },
+  "ri1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    },
+    "_meta": {
+      "title": "Reference image 2"
+    }
+  },
+  "ri2": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    },
+    "_meta": {
+      "title": "Reference image 3"
+    }
+  },
+  "ri3": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    },
+    "_meta": {
+      "title": "Reference image 4"
+    }
+  },
+  "ri4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    },
+    "_meta": {
+      "title": "Reference image 5"
+    }
+  },
+  "ri5": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    },
+    "_meta": {
+      "title": "Reference image 6"
+    }
+  },
+  "ri6": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    },
+    "_meta": {
+      "title": "Reference image 7"
+    }
+  },
+  "ri7": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    },
+    "_meta": {
+      "title": "Reference image 8"
+    }
+  },
+  "ri8": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    },
+    "_meta": {
+      "title": "Reference image 9"
+    }
+  },
+  "rv0": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": ""
+    },
+    "_meta": {
+      "title": "Reference video 1"
+    }
+  },
+  "rvc0": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "rv0",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Reference video 1 components"
+    }
+  },
+  "ra0": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": ""
+    },
+    "_meta": {
+      "title": "Reference audio 1"
+    }
+  },
+  "rv1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": ""
+    },
+    "_meta": {
+      "title": "Reference video 2"
+    }
+  },
+  "rvc1": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "rv1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Reference video 2 components"
+    }
+  },
+  "ra1": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": ""
+    },
+    "_meta": {
+      "title": "Reference audio 2"
+    }
+  },
+  "rv2": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": ""
+    },
+    "_meta": {
+      "title": "Reference video 3"
+    }
+  },
+  "rvc2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "rv2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Reference video 3 components"
+    }
+  },
+  "ra2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": ""
+    },
+    "_meta": {
+      "title": "Reference audio 3"
+    }
+  },
+  "140:131": {
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "inputs": {
+      "clip": [
+        "140:128",
+        0
+      ],
+      "vae": [
+        "140:119",
+        0
+      ],
+      "audio_vae": [
+        "140:120",
+        0
+      ],
+      "prompt": "A cinematic scene using the people, places and style of the reference material.\n\nKeep the identity of <Picture 1> and the look of <Picture 2>. Follow the motion and camera language of <Video 1>. Use <Audio 1> as the sound reference.\n\nNatural movement, coherent physics, clear action, synced sound. No subtitles, no text overlays, no logos.",
+      "width": [
+        "115",
+        0
+      ],
+      "height": [
+        "115",
+        1
+      ],
+      "length": [
+        "140:132",
+        1
+      ],
+      "ref_image_size": "match",
+      "ref_image_0": [
+        "ri0",
+        0
+      ],
+      "ref_image_1": [
+        "ri1",
+        0
+      ],
+      "ref_image_2": [
+        "ri2",
+        0
+      ],
+      "ref_image_3": [
+        "ri3",
+        0
+      ],
+      "ref_image_4": [
+        "ri4",
+        0
+      ],
+      "ref_image_5": [
+        "ri5",
+        0
+      ],
+      "ref_image_6": [
+        "ri6",
+        0
+      ],
+      "ref_image_7": [
+        "ri7",
+        0
+      ],
+      "ref_image_8": [
+        "ri8",
+        0
+      ],
+      "ref_video_0": [
+        "rvc0",
+        0
+      ],
+      "ref_video_audio_0": [
+        "rvc0",
+        1
+      ],
+      "ref_audio_0": [
+        "ra0",
+        0
+      ],
+      "ref_video_1": [
+        "rvc1",
+        0
+      ],
+      "ref_video_audio_1": [
+        "rvc1",
+        1
+      ],
+      "ref_audio_1": [
+        "ra1",
+        0
+      ],
+      "ref_video_2": [
+        "rvc2",
+        0
+      ],
+      "ref_video_audio_2": [
+        "rvc2",
+        1
+      ],
+      "ref_audio_2": [
+        "ra2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "MiniMax H3 Reference to Video"
+    }
+  }
+}

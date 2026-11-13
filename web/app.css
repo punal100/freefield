@@ -376,6 +376,24 @@ input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border: 0; bo
 .drop .bar2 { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
 .drop .fname { position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 16px); font-size: 11.5px; padding: 3px 7px; border-radius: 6px; background: rgba(0, 0, 0, .6);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.refset { display: grid; gap: 8px; padding: 12px; border-radius: 14px; background: #151517; border: 1px solid #1d1d20; }
+.refset.over { border-color: var(--accent); }
+.refset.missing { border-color: var(--bad); }
+.refset > .lbl { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; color: #e4e4e8; }
+.refset > .lbl small { color: var(--faint); font-weight: 500; }
+.ref-item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; border-radius: 10px; background: #0f0f11; border: 1px solid #242428; }
+.ref-media { width: 64px; height: 64px; border-radius: 8px; overflow: hidden; background: #0b0b0c; display: grid; place-items: center; }
+.ref-media img, .ref-media video { width: 100%; height: 100%; object-fit: cover; }
+.ref-media audio { width: 100%; }
+.ref-txt { min-width: 0; display: grid; gap: 2px; }
+.ref-txt b { color: var(--accent); font-size: 12px; }
+.ref-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-note { font-size: 11.5px; color: var(--dim); }
+.ref-note.warn { color: var(--warn); }
+.ref-ctl { display: flex; gap: 4px; }
+.ref-add { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border-radius: 10px; border: 1px dashed #2e2e33;
+  background: transparent; color: var(--dim); cursor: pointer; font: inherit; }
+.ref-add:hover { border-color: var(--accent); color: var(--ink); }
 .field { display: grid; gap: 8px; padding: 12px; border-radius: 14px; background: #151517; border: 1px solid #1d1d20; }
 .field > .lbl { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; color: #e4e4e8; }
 .field > .lbl small { color: var(--faint); font-weight: 500; }

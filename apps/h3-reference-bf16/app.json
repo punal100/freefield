@@ -1,0 +1,388 @@
+{
+  "$schema": "../../schema/app.schema.json",
+  "id": "h3-reference-bf16",
+  "name": "H3 Reference Video BF16",
+  "section": "video",
+  "summary": "A clip with its own sound from a prompt plus up to 9 images, 3 videos and 3 audio references, on the full-base BF16 MiniMax H3.",
+  "higgsfield_feature": "Reference to Video",
+  "pack": "video-h3-bf16",
+  "status": "draft",
+  "workflow": "workflow.api.json",
+  "source": {
+    "template": "ComfyUI MiniMax H3 Reference to Video (native ref2va node)",
+    "comfyui": "0.42.0",
+    "notes": "MiniMaxH3ReferenceToVideo from ComfyUI's core nodes: images, videos (with their extracted soundtracks) and standalone audio condition the same BF16 DiT. Reference videos are transcoded to 24 fps on upload; images are VAE-encoded; unused reference branches are removed before submit. No new model downloads."
+  },
+  "inputs": [
+    {
+      "id": "prompt",
+      "type": "textarea",
+      "label": "Prompt",
+      "required": true,
+      "default": "A cinematic scene using the people, places and style of the reference material.\n\nKeep the identity of <Picture 1> and the look of <Picture 2>. Follow the motion and camera language of <Video 1>. Use <Audio 1> as the sound reference.\n\nNatural movement, coherent physics, clear action, synced sound. No subtitles, no text overlays, no logos.",
+      "help": "Refer to the uploads by tag: <Picture 1>–<Picture 9>, <Video 1>–<Video 3>, <Audio 1>–<Audio 3>. Images come first, then videos, then standalone audio.",
+      "bind": [
+        {
+          "node": "140:131",
+          "field": "prompt"
+        }
+      ]
+    },
+    {
+      "id": "ref_images",
+      "type": "image",
+      "label": "Reference images",
+      "required": false,
+      "help": "Identity, outfit, product or style references, in order. Each one becomes <Picture 1>, <Picture 2>, …",
+      "multiple": {
+        "max": 9
+      },
+      "limits": {
+        "max_mb": 30
+      },
+      "bind": [
+        {
+          "node": "ri0",
+          "field": "image",
+          "index": 0
+        },
+        {
+          "node": "ri1",
+          "field": "image",
+          "index": 1
+        },
+        {
+          "node": "ri2",
+          "field": "image",
+          "index": 2
+        },
+        {
+          "node": "ri3",
+          "field": "image",
+          "index": 3
+        },
+        {
+          "node": "ri4",
+          "field": "image",
+          "index": 4
+        },
+        {
+          "node": "ri5",
+          "field": "image",
+          "index": 5
+        },
+        {
+          "node": "ri6",
+          "field": "image",
+          "index": 6
+        },
+        {
+          "node": "ri7",
+          "field": "image",
+          "index": 7
+        },
+        {
+          "node": "ri8",
+          "field": "image",
+          "index": 8
+        }
+      ]
+    },
+    {
+      "id": "ref_videos",
+      "type": "video",
+      "label": "Reference videos",
+      "required": false,
+      "help": "Motion, camera and performance references. 2–15 s each, 15 s total. Sound is carried with its video as <Video 1> … <Video 3>.",
+      "multiple": {
+        "max": 3
+      },
+      "limits": {
+        "max_mb": 50,
+        "seconds": [
+          2,
+          15
+        ],
+        "total_seconds": 15
+      },
+      "preprocess": "video24",
+      "bind": [
+        {
+          "node": "rv0",
+          "field": "file",
+          "index": 0,
+          "branch": [
+            "rv0",
+            "rvc0"
+          ]
+        },
+        {
+          "node": "rv1",
+          "field": "file",
+          "index": 1,
+          "branch": [
+            "rv1",
+            "rvc1"
+          ]
+        },
+        {
+          "node": "rv2",
+          "field": "file",
+          "index": 2,
+          "branch": [
+            "rv2",
+            "rvc2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ref_audios",
+      "type": "audio",
+      "label": "Reference audio",
+      "required": false,
+      "help": "Voice, music or sound-style references. Each one becomes <Audio 1> … <Audio 3>.",
+      "multiple": {
+        "max": 3
+      },
+      "limits": {
+        "max_mb": 50
+      },
+      "bind": [
+        {
+          "node": "ra0",
+          "field": "audio",
+          "index": 0
+        },
+        {
+          "node": "ra1",
+          "field": "audio",
+          "index": 1
+        },
+        {
+          "node": "ra2",
+          "field": "audio",
+          "index": 2
+        }
+      ]
+    },
+    {
+      "id": "ref_image_size",
+      "type": "select",
+      "label": "Reference detail",
+      "default": "match",
+      "help": "Match is faster. Max keeps a 2048 px short edge for the best identity, but reference tokens ride every sampling step and can be several times slower.",
+      "options": [
+        {
+          "value": "match",
+          "label": "Match the output (faster)"
+        },
+        {
+          "value": "max",
+          "label": "2048 px (best identity)"
+        }
+      ],
+      "bind": [
+        {
+          "node": "140:131",
+          "field": "ref_image_size"
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "type": "select",
+      "label": "Format",
+      "default": "16:9 (Widescreen)",
+      "options": [
+        {
+          "value": "16:9 (Widescreen)",
+          "label": "16:9"
+        },
+        {
+          "value": "9:16 (Portrait Widescreen)",
+          "label": "9:16"
+        },
+        {
+          "value": "1:1 (Square)",
+          "label": "1:1"
+        },
+        {
+          "value": "4:3 (Standard)",
+          "label": "4:3"
+        }
+      ],
+      "bind": [
+        {
+          "node": "115",
+          "field": "aspect_ratio"
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "type": "select",
+      "label": "Resolution",
+      "default": 0.98,
+      "help": "Native is the model training size, 1344x768 at 16:9. Fast is the lighter template default.",
+      "options": [
+        {
+          "value": 0.4,
+          "label": "Fast 864x480 (0.4 MP)"
+        },
+        {
+          "value": 0.98,
+          "label": "Native 1344x768 (0.98 MP)"
+        }
+      ],
+      "bind": [
+        {
+          "node": "115",
+          "field": "megapixels"
+        }
+      ]
+    },
+    {
+      "id": "duration",
+      "type": "slider",
+      "label": "Duration (s)",
+      "min": 2,
+      "max": 10,
+      "step": 1,
+      "default": 5,
+      "bind": [
+        {
+          "node": "140:133",
+          "field": "value"
+        }
+      ]
+    },
+    {
+      "id": "steps",
+      "type": "slider",
+      "label": "Steps",
+      "min": 8,
+      "max": 50,
+      "step": 1,
+      "default": 50,
+      "help": "Fewer steps run faster and look rougher.",
+      "bind": [
+        {
+          "node": "140:137",
+          "field": "value"
+        }
+      ]
+    },
+    {
+      "id": "seed",
+      "type": "seed",
+      "label": "Seed",
+      "default": -1,
+      "help": "-1 picks a random seed",
+      "bind": [
+        {
+          "node": "140:129",
+          "field": "noise_seed"
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "node": "92",
+      "type": "video",
+      "label": "Video"
+    }
+  ],
+  "models": [
+    {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "file": "diffusion_models/minimax_h3_fl2va_bf16.safetensors",
+      "dir": "diffusion_models",
+      "gb": 66.28,
+      "phase": "denoise",
+      "license": "MiniMax H3 Community License"
+    },
+    {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "file": "text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors",
+      "dir": "text_encoders",
+      "gb": 51.51,
+      "phase": "encode",
+      "license": "MiniMax H3 Community License"
+    },
+    {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "file": "vae/minimax_h3_video_vae_fp16.safetensors",
+      "dir": "vae",
+      "gb": 5.21,
+      "phase": "decode",
+      "license": "MiniMax H3 Community License"
+    },
+    {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "file": "vae/minimax_h3_audio_vae_fp32.safetensors",
+      "dir": "vae",
+      "gb": 0.61,
+      "phase": "decode",
+      "license": "MiniMax H3 Community License"
+    }
+  ],
+  "credits": [
+    "MiniMax H3 (MiniMax H3 Community License)"
+  ],
+  "test": {
+    "prompt": "a cat yawns on a sunny windowsill",
+    "duration": 2
+  },
+  "presets": [
+    {
+      "id": "reference-50",
+      "label": "Reference (50 steps, Euler)",
+      "sets": [
+        {
+          "node": "140:123",
+          "field": "sampler_name",
+          "value": "euler"
+        },
+        {
+          "node": "140:137",
+          "field": "value",
+          "value": 50
+        }
+      ]
+    },
+    {
+      "id": "reference-49",
+      "label": "Reference parity (49 steps)",
+      "sets": [
+        {
+          "node": "140:123",
+          "field": "sampler_name",
+          "value": "euler"
+        },
+        {
+          "node": "140:137",
+          "field": "value",
+          "value": 49
+        }
+      ]
+    },
+    {
+      "id": "freefield-50",
+      "label": "Freefield native (50 steps, res_multistep)",
+      "sets": [
+        {
+          "node": "140:123",
+          "field": "sampler_name",
+          "value": "res_multistep"
+        },
+        {
+          "node": "140:137",
+          "field": "value",
+          "value": 50
+        }
+      ]
+    }
+  ]
+}
