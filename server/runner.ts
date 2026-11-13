@@ -146,6 +146,23 @@ export function setValue(value: unknown, values: Values): unknown {
   return typeof value === "string" && /\{[a-z][a-z0-9_]*\}/.test(value) ? renderTemplate(value, values) : value;
 }
 
+/** Remove links to pruned nodes, including links nested in an autogrow input's object. */
+function stripRemoved(value: unknown, removed: Set<string>): unknown {
+  if (Array.isArray(value)) {
+    if (value.length === 2 && typeof value[0] === "string" && removed.has(value[0])) return undefined;
+    return value.map((v) => stripRemoved(v, removed)).filter((v) => v !== undefined);
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(value)) {
+      const kept = stripRemoved(v, removed);
+      if (kept !== undefined) out[key] = kept;
+    }
+    return out;
+  }
+  return value;
+}
+
 /** Drop whole reference branches (loaders, video components) and the links that pointed at them. */
 function pruneNodes(wf: Settable, removed: Set<string>): void {
   const json = wf.json;
@@ -155,7 +172,9 @@ function pruneNodes(wf: Settable, removed: Set<string>): void {
     const node = raw as { inputs?: Record<string, unknown> };
     if (!node.inputs) continue;
     for (const [field, value] of Object.entries(node.inputs)) {
-      if (Array.isArray(value) && value.length === 2 && typeof value[0] === "string" && removed.has(value[0])) delete node.inputs[field];
+      const kept = stripRemoved(value, removed);
+      if (kept === undefined) delete node.inputs[field];
+      else node.inputs[field] = kept;
     }
   }
 }

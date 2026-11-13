@@ -146,10 +146,10 @@ test("multiple reference files bind by index and unused branches are pruned", ()
   assert.ok(wf.json.rvc0, "the used video components node stays");
   assert.ok(wf.json.rv0, "the used video loader stays");
   assert.equal(wf.json.ra0, undefined, "unused audio slot removed");
-  const ref = wf.json["140:131"] as { inputs: Record<string, unknown> };
-  assert.ok(!("ref_image_2" in ref.inputs), "no dangling image input");
-  assert.ok(!("ref_audio_0" in ref.inputs), "no dangling audio input");
-  assert.ok("ref_video_0" in ref.inputs && "ref_video_audio_0" in ref.inputs, "video and its soundtrack stay paired");
+  const ref = wf.json["140:131"] as { inputs: Record<string, Record<string, unknown>> };
+  assert.ok(!("ref_image_2" in ref.inputs.ref_images), "no dangling image input");
+  assert.deepEqual(ref.inputs.ref_audios, {}, "no dangling audio input");
+  assert.ok("ref_video_0" in ref.inputs.ref_videos && "ref_video_audio_0" in ref.inputs.ref_video_audios, "video and its soundtrack stay paired");
   assert.throws(() => resolveValues(app, { prompt: "x", ref_images: Array.from({ length: 10 }, (_, i) => img(i)) }), /at most 9/);
 });
 
