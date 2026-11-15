@@ -772,7 +772,7 @@ function dropzone(app, inp, rerender) {
 }
 
 function sideField(app, inp, f, ui, onChange = null) {
-  const set = (v) => { f.values[inp.id] = v; persistSoon(); };
+  const set = (v) => { f.values[inp.id] = v; persistSoon(); onChange?.(inp, v); };
   const help = inp.help ? el("p", { class: "help" }, inp.help) : null;
   if (inp.type === "textarea") {
     const ta = el("textarea", { class: inp.required ? "" : "short", placeholder: inp.default ? t("ws.eg", { x: inp.default }) : inp.label, value: f.values[inp.id] ?? "", "aria-label": inp.label });
@@ -807,7 +807,7 @@ function sideField(app, inp, f, ui, onChange = null) {
   if (inp.type === "slider") return el("div", { class: "field" }, rangeInput(inp, f.values[inp.id], set), help);
   if (inp.type === "toggle") {
     const box = el("input", { type: "checkbox", checked: Boolean(f.values[inp.id]), "aria-label": inp.label });
-    box.addEventListener("change", () => { set(box.checked); onChange?.(); });
+    box.addEventListener("change", () => set(box.checked));
     return el("label", { class: "field" }, el("span", { class: "togrow" }, el("span", { class: "t" }, el("b", { style: { fontSize: "13px" } }, inp.label),
       inp.help ? el("small", {}, inp.help) : null), el("span", { class: "switch" }, box, el("i"))));
   }
@@ -953,10 +953,26 @@ function sidebarPanel(app, rerenderSide) {
   card.onkeydown = (e) => { if (e.key === "Enter") openSwitch(e); };
   card.append(change);
 
+  if (app.id === "h3-regenerate-2k-ic" && f.values.resolution === "4k") f.values.vae = "standard";
+  const onValue = (inp, value) => {
+    if (app.id !== "h3-regenerate-2k-ic") {
+      if (inp.id === "ref_video_audio") rerenderSide();
+      return;
+    }
+    if (inp.id === "resolution" && value === "4k" && f.values.vae !== "standard") {
+      f.values.vae = "standard";
+      rerenderSide();
+    } else if (inp.id === "vae" && value !== "standard" && f.values.resolution === "4k") {
+      f.values.vae = "standard";
+      rerenderSide();
+    } else if (inp.id === "ref_video_audio") {
+      rerenderSide();
+    }
+  };
   const main = [], adv = [];
   for (const inp of app.inputs) {
     if (isMedia(inp.type)) main.push(dropzone(app, inp, rerenderSide));
-    else (isAdvanced(inp) ? adv : main).push(sideField(app, inp, f, ui, inp.id === "ref_video_audio" ? rerenderSide : null));
+    else (isAdvanced(inp) ? adv : main).push(sideField(app, inp, f, ui, onValue));
   }
   if (app.presets?.length) adv.unshift(presetField(app, f));
   if (app.inputs.some((i) => i.type === "video" || i.type === "audio")) main.push(refBudget(app));

@@ -22,21 +22,9 @@
     {
       "id": "prompt",
       "type": "textarea",
-      "label": "Original prompt",
+      "label": "Draft caption (optional)",
       "required": false,
-      "help": "Pass the caption that generated the draft, unchanged. It may be empty."
-    },
-    {
-      "id": "quality",
-      "type": "select",
-      "label": "Quality",
-      "default": "balanced",
-      "help": "Sets the sampler and VAE defaults below. Advanced controls can override them.",
-      "options": [
-        { "value": "fast", "label": "Fast — 1080p, up3, fast VAE" },
-        { "value": "balanced", "label": "Balanced — 2K, up4, fast VAE" },
-        { "value": "maximum", "label": "Maximum — 2K, hf8, standard VAE" }
-      ]
+      "help": "The caption used to generate the 768p draft. Pass it unchanged for identity, lip-sync and text fidelity; it may be empty."
     },
     {
       "id": "resolution",
@@ -77,7 +65,7 @@
       "type": "select",
       "label": "Decoder",
       "default": "fast",
-      "help": "Fast VAE is the default for 1080p/2K; standard VAE favors fidelity and is required for 4K.",
+      "help": "Fast VAE is the default for 1080p/2K. 4K automatically selects the standard H3 VAE. Selecting fast at 4K is blocked.",
       "options": [
         { "value": "fast", "label": "Fast VAE" },
         { "value": "standard", "label": "Standard H3 VAE" }
