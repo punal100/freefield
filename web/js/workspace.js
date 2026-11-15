@@ -46,16 +46,60 @@ function persist(app) {
   store.set(`values.${app.id}`, { ...f.values, __preset: f.preset });
 }
 
-const ACCEPT = { image: "image/*", video: "video/*", audio: "audio/*" };
+const ACCEPT = {
+  image: "image/png,image/jpeg,image/webp,image/bmp,image/gif",
+  video: "video/mp4,video/quicktime,video/webm,video/x-matroska,video/x-msvideo",
+  audio: "audio/mpeg,audio/wav,audio/x-wav,audio/flac,audio/mp4,audio/aac,audio/ogg",
+};
+const EXTENSIONS = {
+  image: ["png", "jpg", "jpeg", "webp", "bmp", "gif"],
+  video: ["mp4", "mov", "mkv", "webm", "avi", "m4v"],
+  audio: ["mp3", "wav", "flac", "ogg", "m4a", "aac"],
+};
 function fileMatches(type, file) {
-  if (file.type) return file.type.startsWith(`${type}/`);
-  const ext = extOf(file.name);
-  return { image: ["png", "jpg", "jpeg", "webp", "gif"], video: ["mp4", "mov", "webm", "mkv"], audio: ["mp3", "wav", "flac", "ogg", "m4a"] }[type]?.includes(ext);
+  return Boolean(EXTENSIONS[type]?.includes(extOf(file.name)));
+}
+
+function mediaSeconds(file, type) {
+  return new Promise((resolve, reject) => {
+    const media = document.createElement(type === "audio" ? "audio" : "video");
+    const url = URL.createObjectURL(file);
+    const done = (value, error) => {
+      URL.revokeObjectURL(url);
+      media.removeAttribute("src");
+      if (error) reject(error); else resolve(value);
+    };
+    media.preload = "metadata";
+    media.onloadedmetadata = () => Number.isFinite(media.duration) ? done(media.duration) : done(0);
+    media.onerror = () => done(0, new Error(`${file.name}: could not read the ${type} duration`));
+    media.src = url;
+  });
+}
+
+async function validateMediaFiles(app) {
+  for (const inp of app.inputs.filter((i) => isMedia(i.type))) {
+    const value = formFor(app).files[inp.id];
+    const items = Array.isArray(value) ? value : value ? [value] : [];
+    for (const { file } of items) {
+      if (!fileMatches(inp.type, file)) {
+        throw new Error(`${inp.label}: ${file.name} — unsupported ${inp.type} format`);
+      }
+      if (app.backend === "sglang" && inp.type === "image" && !["png", "jpg", "jpeg", "webp", "bmp"].includes(extOf(file.name))) {
+        throw new Error(`${inp.label}: ${file.name} — SGLang accepts PNG, JPG, JPEG, WebP, or BMP images`);
+      }
+      const [min, max] = inp.limits?.seconds ?? [];
+      if (min === undefined || max === undefined || (inp.type !== "video" && inp.type !== "audio")) continue;
+      const seconds = await mediaSeconds(file, inp.type);
+      if (seconds < min - 0.1 || seconds > max + 0.1) {
+        throw new Error(`${inp.label}: ${file.name} is ${seconds.toFixed(1)} s; needs ${min}–${max} s`);
+      }
+    }
+  }
 }
 
 function setFile(app, inp, file) {
   if (!fileMatches(inp.type, file)) {
-    toast(`${inp.label}: ${file.name}?`, { error: true });
+    toast(`${inp.label}: ${file.name} — unsupported ${inp.type} format`, { error: true });
     return false;
   }
   const maxMb = inp.limits?.max_mb;
@@ -76,6 +120,25 @@ function setFile(app, inp, file) {
     if (f.files[inp.id]) URL.revokeObjectURL(f.files[inp.id].url);
     f.files[inp.id] = { file, url: URL.createObjectURL(file) };
   }
+  dropMasksOf(app, inp.id);
+  return true;
+}
+
+/** Replace one item in a multiple reference slot without touching the others. */
+function replaceFile(app, inp, file, index) {
+  if (!fileMatches(inp.type, file)) {
+    toast(`${inp.label}: ${file.name} — unsupported ${inp.type} format`, { error: true });
+    return false;
+  }
+  const maxMb = inp.limits?.max_mb;
+  if (maxMb && file.size > maxMb * 1e6) {
+    toast(`${inp.label}: ${t("ws.drop.mb", { mb: maxMb })}`, { error: true });
+    return false;
+  }
+  const list = formFor(app).files[inp.id];
+  if (!Array.isArray(list) || index < 0 || index >= list.length) return false;
+  URL.revokeObjectURL(list[index].url);
+  list[index] = { file, url: URL.createObjectURL(file) };
   dropMasksOf(app, inp.id);
   return true;
 }
@@ -174,6 +237,7 @@ async function submit(app, ui) {
   const n = Math.max(1, Math.min(4, f.count || 1));
   persist(app);
   try {
+    await validateMediaFiles(app);
     for (let k = 0; k < n; k++) await feed.run(app.id, buildForm(app, { randomSeed: n > 1 }));
     toast(t("toast.started", { app: app.name }));
     return true;
@@ -554,12 +618,18 @@ function multiDropzone(app, inp, rerender) {
   const list = f.files[inp.id] ?? [];
   const max = inp.multiple?.max ?? 1;
   const input = el("input", { type: "file", accept: ACCEPT[inp.type], multiple: true, hidden: true });
+  const replaceInput = el("input", { type: "file", accept: ACCEPT[inp.type], hidden: true });
+  let replaceIndex = -1;
   const add = (files) => {
     let changed = false;
     for (const file of files) if (setFile(app, inp, file)) changed = true;
     if (changed) rerender();
   };
   input.addEventListener("change", () => { add([...input.files]); input.value = ""; });
+  replaceInput.addEventListener("change", () => {
+    if (replaceInput.files[0] && replaceFile(app, inp, replaceInput.files[0], replaceIndex)) rerender();
+    replaceInput.value = "";
+  });
   const bits = [];
   bits.push(`up to ${max}`);
   if (inp.limits?.max_mb) bits.push(t("ws.drop.mb", { mb: inp.limits.max_mb }));
@@ -593,6 +663,7 @@ function multiDropzone(app, inp, rerender) {
       el("div", { class: "ref-media" }, media),
       el("div", { class: "ref-txt" }, el("b", {}, `<${REF_TAG[inp.type]} ${i + 1}>`), el("span", { class: "ref-name" }, x.file.name), warn),
       el("div", { class: "ref-ctl" },
+        el("button", { class: "mini", type: "button", title: t("ws.replace"), "aria-label": t("ws.replace"), onclick: () => { replaceIndex = i; replaceInput.click(); } }, icon("swap")),
         el("button", { class: "mini", type: "button", title: "Move up", "aria-label": "Move up", onclick: () => move(i - 1), disabled: i === 0 }, "↑"),
         el("button", { class: "mini", type: "button", title: "Move down", "aria-label": "Move down", onclick: () => move(i + 1), disabled: i === list.length - 1 }, "↓"),
         el("button", { class: "mini", type: "button", title: t("ws.remove"), "aria-label": t("ws.remove"), onclick: () => { clearFile(app, inp.id, i); rerender(); } }, icon("x"))));
@@ -604,7 +675,7 @@ function multiDropzone(app, inp, rerender) {
     list.length < max ? el("button", { class: "ref-add", type: "button", onclick: () => input.click(), "aria-label": t("ws.add", { what: inp.label }) },
       icon("plus"), el("span", {}, t("ws.add", { what: inp.label }))) : null,
     el("small", { class: "faint" }, inp.help || "", inp.help ? el("br") : null, note),
-    input);
+    input, replaceInput);
   zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("over"); });
   zone.addEventListener("dragleave", () => zone.classList.remove("over"));
   zone.addEventListener("drop", (e) => {

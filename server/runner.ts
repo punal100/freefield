@@ -1,14 +1,17 @@
 // The waiter: turns form values into a filled workflow using only what app.json says,
 // asks the gateway to clear the GPU when the app's models change, and submits with the Comfy SDK.
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
+import { promisify } from "node:util";
 import { Comfy } from "@comfyorg/sdk";
 import type { App, Input } from "./registry.ts";
 import { isFileInput, modelKey } from "./registry.ts";
 import type { JobLike } from "./history.ts";
 import { SglangClient, SglangJob } from "./sglang.ts";
+
+const execFileAsync = promisify(execFile);
 
 export type FileValue = { bytes: Uint8Array; name: string; type?: string };
 export type Values = Record<string, unknown>;
@@ -249,37 +252,48 @@ function ffprobe(): string {
   return ffprobePath;
 }
 
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"]);
+const AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"]);
+
+function extensionOf(name: string): string {
+  return extname(name).toLowerCase();
+}
+
 function videoExtension(name: string): string {
-  const ext = extname(name).toLowerCase();
+  const ext = extensionOf(name);
   return /^\.[a-z0-9]{1,8}$/.test(ext) ? ext : ".mp4";
 }
 
-function withTempFile<T>(file: FileValue, fn: (dir: string, input: string) => T): T {
-  const dir = mkdtempSync(join(tmpdir(), "freefield-"));
-  try {
-    const input = join(dir, `input${videoExtension(file.name)}`);
-    writeFileSync(input, file.bytes);
-    return fn(dir, input);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+function withTempFile<T>(file: FileValue, fn: (dir: string, input: string) => Promise<T>): Promise<T> {
+  return (async () => {
+    const dir = await mkdtemp(join(tmpdir(), "freefield-"));
+    try {
+      const input = join(dir, `input${videoExtension(file.name)}`);
+      await writeFile(input, file.bytes);
+      return await fn(dir, input);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  })();
 }
 
-type VideoProbe = { seconds: number; fps: number; audio: boolean };
-function probeVideo(file: FileValue): VideoProbe {
-  return withTempFile(file, (_dir, input) => {
+type MediaProbe = { seconds: number; fps: number; audio: boolean };
+async function probeMedia(file: FileValue): Promise<MediaProbe> {
+  return withTempFile(file, async (_dir, input) => {
     let text: string;
     try {
-      text = execFileSync(ffprobe(), [
+      const result = await execFileAsync(ffprobe(), [
         "-v", "error", "-show_entries", "format=duration:stream=codec_type,avg_frame_rate", "-of", "json", input,
-      ], { encoding: "utf8", timeout: 120_000 }) as string;
+      ], { encoding: "utf8", timeout: 120_000 });
+      text = String(result.stdout);
     } catch (e) {
-      throw new InputError(`${file.name}: could not read the video (${(e as Error).message})`);
+      throw new InputError(`${file.name}: could not read the media (${(e as Error).message})`);
     }
     let data: { format?: { duration?: string }; streams?: { codec_type?: string; avg_frame_rate?: string }[] };
     try { data = JSON.parse(text); } catch { throw new InputError(`${file.name}: ffprobe returned unreadable data`); }
     const seconds = Number(data.format?.duration);
-    if (!Number.isFinite(seconds) || seconds <= 0) throw new InputError(`${file.name}: could not read the video duration`);
+    if (!Number.isFinite(seconds) || seconds <= 0) throw new InputError(`${file.name}: could not read the media duration`);
     const video = data.streams?.find((s) => s.codec_type === "video");
     const [num, den] = String(video?.avg_frame_rate || "0/1").split("/").map(Number);
     const fps = den ? num / den : num;
@@ -288,16 +302,16 @@ function probeVideo(file: FileValue): VideoProbe {
 }
 
 /** 24 fps H.264/AAC, because MiniMaxH3ReferenceToVideo treats the frames it is given as 24 fps. */
-function transcode24(file: FileValue, probe: VideoProbe): FileValue {
-  const bytes = withTempFile(file, (dir, input) => {
+async function transcode24(file: FileValue, probe: MediaProbe): Promise<FileValue> {
+  const bytes = await withTempFile(file, async (dir, input) => {
     const output = join(dir, "out.mp4");
     const args = ["-y", "-v", "error", "-i", input, "-vf", "fps=24", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"];
     if (probe.audio) args.push("-c:a", "aac", "-b:a", "160k");
     else args.push("-an");
     args.push("-movflags", "+faststart", output);
-    try { execFileSync(ffmpeg(), args, { stdio: "ignore", timeout: 300_000 }); }
+    try { await execFileAsync(ffmpeg(), args, { timeout: 300_000 }); }
     catch (e) { throw new InputError(`${file.name}: 24 fps conversion failed (${(e as Error).message})`); }
-    return readFileSync(output);
+    return readFile(output);
   });
   const base = file.name.replace(/\.[^.]+$/, "") || "reference";
   return { bytes: new Uint8Array(bytes), name: `${base}.mp4`, type: "video/mp4" };
@@ -305,25 +319,54 @@ function transcode24(file: FileValue, probe: VideoProbe): FileValue {
 
 /**
  * Check reference clips and convert them to the 24 fps the H3 reference node expects.
- * Legacy single-video apps are left alone: their duration was always a UI hint only.
+ * SGLang also rejects unsupported extensions and out-of-range audio durations here,
+ * before any file is uploaded to the supervisor. The conversion is asynchronous so
+ * ffmpeg cannot block the Freefield HTTP event loop.
  */
-export function preflightMedia(app: App, values: Values): void {
+export async function preflightMedia(app: App, values: Values): Promise<void> {
+  const sglang = app.backend === "sglang";
   for (const input of app.inputs) {
-    if (input.type !== "video") continue;
     const raw = values[input.id];
     if (raw === undefined) continue;
-    if (!input.multiple && input.preprocess !== "video24") continue;
     const files = (Array.isArray(raw) ? raw : [raw]).filter(isFileValue);
     if (!files.length) continue;
+
+    if (sglang) {
+      const allowed = input.type === "image" ? IMAGE_EXTENSIONS : input.type === "video" ? VIDEO_EXTENSIONS : input.type === "audio" ? AUDIO_EXTENSIONS : null;
+      if (allowed) {
+        for (const file of files) {
+          if (!allowed.has(extensionOf(file.name))) {
+            const pretty = input.type === "image" ? "PNG, JPG, JPEG, WebP, or BMP" : input.type === "video" ? "MP4, MOV, MKV, WebM, AVI, or M4V" : "WAV, MP3, FLAC, M4A, AAC, or OGG";
+            throw new InputError(`${input.id}: ${file.name} has an unsupported ${input.type} extension; use ${pretty}`);
+          }
+        }
+      }
+    }
+
+    if (input.type === "image") continue;
+    if (input.type === "audio") {
+      const [min, max] = input.limits?.seconds ?? [];
+      if (min === undefined && max === undefined) continue;
+      const EPS = 0.1;
+      for (const file of files) {
+        const probe = await probeMedia(file);
+        if (min !== undefined && probe.seconds < min - EPS) throw new InputError(`${input.id}: ${file.name} is ${probe.seconds.toFixed(1)} s; the minimum is ${min} s`);
+        if (max !== undefined && probe.seconds > max + EPS) throw new InputError(`${input.id}: ${file.name} is ${probe.seconds.toFixed(1)} s; the maximum is ${max} s`);
+      }
+      continue;
+    }
+
+    if (input.type !== "video") continue;
+    if (!input.multiple && input.preprocess !== "video24") continue;
     const [min, max] = input.limits?.seconds ?? [];
     const EPS = 0.1;
     let total = 0;
     for (let i = 0; i < files.length; i++) {
-      const probe = probeVideo(files[i]);
+      const probe = await probeMedia(files[i]);
       if (min !== undefined && probe.seconds < min - EPS) throw new InputError(`${input.id}: ${files[i].name} is ${probe.seconds.toFixed(1)} s; the minimum is ${min} s`);
       if (max !== undefined && probe.seconds > max + EPS) throw new InputError(`${input.id}: ${files[i].name} is ${probe.seconds.toFixed(1)} s; the maximum is ${max} s`);
       total += probe.seconds;
-      if (input.preprocess === "video24") files[i] = transcode24(files[i], probe);
+      if (input.preprocess === "video24") files[i] = await transcode24(files[i], probe);
     }
     const totalMax = input.limits?.total_seconds;
     if (totalMax && total > totalMax + EPS) throw new InputError(`${input.id}: the clips are ${total.toFixed(1)} s together; the maximum is ${totalMax} s`);
@@ -434,7 +477,7 @@ export class Runner {
       throw new InputError(`${app.id} is a draft; set FREEFIELD_DRAFTS=1 (or pass --draft) to run it anyway`);
     }
     const values = resolveValues(app, rawValues);
-    preflightMedia(app, values);
+    await preflightMedia(app, values);
     if (app.backend === "sglang") {
       if (!this.sglang) throw new InputError(`${app.id} needs SGLANG_BASE_URL`);
       await this.prepare(app);   // free the ComfyUI models before SGLang loads

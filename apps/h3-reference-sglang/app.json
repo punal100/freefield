@@ -59,7 +59,11 @@
         "max": 3
       },
       "limits": {
-        "max_mb": 50
+        "max_mb": 50,
+        "seconds": [
+          2,
+          15
+        ]
       }
     },
     {
