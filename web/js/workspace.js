@@ -77,6 +77,7 @@ function mediaSeconds(file, type) {
 }
 
 async function validateMediaFiles(app) {
+  const totals = { video: 0, audio: 0 };
   for (const inp of app.inputs.filter((i) => isMedia(i.type))) {
     const value = formFor(app).files[inp.id];
     const items = Array.isArray(value) ? value : value ? [value] : [];
@@ -93,8 +94,31 @@ async function validateMediaFiles(app) {
       if (seconds < min - 0.1 || seconds > max + 0.1) {
         throw new Error(`${inp.label}: ${file.name} is ${seconds.toFixed(1)} s; needs ${min}–${max} s`);
       }
+      totals[inp.type] += seconds;
     }
   }
+  for (const [kind, total] of Object.entries(totals)) {
+    if (total > 15.1) throw new Error(`Reference ${kind}: ${total.toFixed(1)} s total; the maximum is 15 s`);
+  }
+}
+
+function refBudget(app) {
+  const box = el("div", { class: "ref-budget", style: { margin: "8px 0", padding: "8px 10px", border: "1px solid var(--line)", borderRadius: "8px", fontSize: "12px" } });
+  const update = async () => {
+    const totals = { video: 0, audio: 0 };
+    for (const inp of app.inputs.filter((i) => i.type === "video" || i.type === "audio")) {
+      const value = formFor(app).files[inp.id];
+      const items = Array.isArray(value) ? value : value ? [value] : [];
+      for (const { file } of items) {
+        try { totals[inp.type] += await mediaSeconds(file, inp.type); } catch { /* unreadable files are reported on submit */ }
+      }
+    }
+    const video = totals.video.toFixed(1), audio = totals.audio.toFixed(1);
+    box.textContent = `Reference budgets — Video ${video}/15 s · Audio ${audio}/15 s`;
+    box.style.color = totals.video > 15.1 || totals.audio > 15.1 ? "var(--warn, #e5a50a)" : "";
+  };
+  update();
+  return box;
 }
 
 function setFile(app, inp, file) {
@@ -828,6 +852,7 @@ function sidebarPanel(app, rerenderSide) {
     else (isAdvanced(inp) ? adv : main).push(sideField(app, inp, f, ui));
   }
   if (app.presets?.length) adv.unshift(presetField(app, f));
+  if (app.inputs.some((i) => i.type === "video" || i.type === "audio")) main.push(refBudget(app));
   const advanced = adv.length ? el("details", { class: "adv" }, el("summary", {}, t("ws.advanced"), icon("chevD", "i-chev")), el("div", { class: "in" }, ...adv)) : null;
 
   const scroll = el("div", { class: "side-scroll" }, card, modeSwitch(app), ...main, advanced);

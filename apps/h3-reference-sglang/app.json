@@ -35,7 +35,7 @@
       "type": "video",
       "label": "Reference videos",
       "required": false,
-      "help": "Motion, camera and performance references. 2-15 s each, 15 s total. The video's original soundtrack is used as its audio reference.",
+      "help": "Motion, camera and performance references. 2-15 s each, 15 s total. The video's soundtrack is used unless the keep-audio toggle is turned off.",
       "multiple": {
         "max": 3
       },
@@ -48,6 +48,13 @@
         "total_seconds": 15
       },
       "preprocess": "video24"
+    },
+    {
+      "id": "ref_video_audio",
+      "type": "toggle",
+      "label": "Keep audio from reference videos",
+      "default": true,
+      "help": "Turn off to strip the soundtrack from reference videos and use only separate audio references."
     },
     {
       "id": "ref_audios",
@@ -63,7 +70,8 @@
         "seconds": [
           2,
           15
-        ]
+        ],
+        "total_seconds": 15
       }
     },
     {

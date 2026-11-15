@@ -302,11 +302,11 @@ async function probeMedia(file: FileValue): Promise<MediaProbe> {
 }
 
 /** 24 fps H.264/AAC, because MiniMaxH3ReferenceToVideo treats the frames it is given as 24 fps. */
-async function transcode24(file: FileValue, probe: MediaProbe): Promise<FileValue> {
+async function transcode24(file: FileValue, probe: MediaProbe, keepAudio: boolean): Promise<FileValue> {
   const bytes = await withTempFile(file, async (dir, input) => {
     const output = join(dir, "out.mp4");
     const args = ["-y", "-v", "error", "-i", input, "-vf", "fps=24", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"];
-    if (probe.audio) args.push("-c:a", "aac", "-b:a", "160k");
+    if (probe.audio && keepAudio) args.push("-c:a", "aac", "-b:a", "160k");
     else args.push("-an");
     args.push("-movflags", "+faststart", output);
     try { await execFileAsync(ffmpeg(), args, { timeout: 300_000 }); }
@@ -325,6 +325,7 @@ async function transcode24(file: FileValue, probe: MediaProbe): Promise<FileValu
  */
 export async function preflightMedia(app: App, values: Values): Promise<void> {
   const sglang = app.backend === "sglang";
+  const keepVideoAudio = values.ref_video_audio !== false && values.ref_video_audio !== "false";
   for (const input of app.inputs) {
     const raw = values[input.id];
     if (raw === undefined) continue;
@@ -348,11 +349,15 @@ export async function preflightMedia(app: App, values: Values): Promise<void> {
       const [min, max] = input.limits?.seconds ?? [];
       if (min === undefined && max === undefined) continue;
       const EPS = 0.1;
+      let total = 0;
       for (const file of files) {
         const probe = await probeMedia(file);
         if (min !== undefined && probe.seconds < min - EPS) throw new InputError(`${input.id}: ${file.name} is ${probe.seconds.toFixed(1)} s; the minimum is ${min} s`);
         if (max !== undefined && probe.seconds > max + EPS) throw new InputError(`${input.id}: ${file.name} is ${probe.seconds.toFixed(1)} s; the maximum is ${max} s`);
+        total += probe.seconds;
       }
+      const totalMax = input.limits?.total_seconds;
+      if (totalMax && total > totalMax + EPS) throw new InputError(`${input.id}: the audio clips are ${total.toFixed(1)} s together; the maximum is ${totalMax} s`);
       continue;
     }
 
@@ -366,7 +371,7 @@ export async function preflightMedia(app: App, values: Values): Promise<void> {
       if (min !== undefined && probe.seconds < min - EPS) throw new InputError(`${input.id}: ${files[i].name} is ${probe.seconds.toFixed(1)} s; the minimum is ${min} s`);
       if (max !== undefined && probe.seconds > max + EPS) throw new InputError(`${input.id}: ${files[i].name} is ${probe.seconds.toFixed(1)} s; the maximum is ${max} s`);
       total += probe.seconds;
-      if (input.preprocess === "video24") files[i] = await transcode24(files[i], probe);
+      if (input.preprocess === "video24") files[i] = await transcode24(files[i], probe, keepVideoAudio);
     }
     const totalMax = input.limits?.total_seconds;
     if (totalMax && total > totalMax + EPS) throw new InputError(`${input.id}: the clips are ${total.toFixed(1)} s together; the maximum is ${totalMax} s`);
