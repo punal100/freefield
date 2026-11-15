@@ -26,8 +26,52 @@
       "type": "textarea",
       "label": "Prompt",
       "required": true,
-      "default": "The scene continues naturally: same people, place, light and camera style.",
-      "help": "Describe what happens next. The last frames are used as the motion context."
+      "default": "Continue the motion, camera and scene from <Video 1>, keeping the same people, place, light and sound. The scene continues naturally.",
+      "help": "Describe what happens next. The source tail is Video 1; extra reference videos are Video 2+; images are Picture 1-9; audio clips are Audio 1-3."
+    },
+    {
+      "id": "ref_images",
+      "type": "image",
+      "label": "Reference images",
+      "required": false,
+      "help": "Identity, outfit, product or style references. These do not replace the source tail; they supplement it.",
+      "multiple": {
+        "max": 9
+      },
+      "limits": {
+        "max_mb": 30
+      }
+    },
+    {
+      "id": "ref_videos",
+      "type": "video",
+      "label": "Extra reference videos",
+      "required": false,
+      "help": "Optional motion/camera references. The source tail is Video 1; these are Video 2 and Video 3. Keep their total short enough to leave room for the tail in the 15 s video budget.",
+      "multiple": {
+        "max": 2
+      },
+      "limits": {
+        "max_mb": 50,
+        "seconds": [2, 13],
+        "total_seconds": 13
+      },
+      "preprocess": "video24"
+    },
+    {
+      "id": "ref_audios",
+      "type": "audio",
+      "label": "Reference audio",
+      "required": false,
+      "help": "Voice, music or sound-style references. Audio has its own 15 s budget, separate from video.",
+      "multiple": {
+        "max": 3
+      },
+      "limits": {
+        "max_mb": 50,
+        "seconds": [2, 15],
+        "total_seconds": 15
+      }
     },
     {
       "id": "duration",
@@ -44,7 +88,7 @@
       "type": "select",
       "label": "Motion context",
       "default": 39,
-      "help": "Frames carried into the new clip. 39 frames is the community standard.",
+      "help": "Frames cut from the end of the source and added as Video 1. 39 frames is the community standard.",
       "options": [
         { "value": 5, "label": "5 frames (0.2 s)" },
         { "value": 22, "label": "22 frames (0.9 s)" },
@@ -77,5 +121,5 @@
     "MiniMax H3 (MiniMax H3 Community License)",
     "SGLang"
   ],
-  "notes": "Draft: the SGLang extension adapter and source+continuation concat are planned. The standalone ComfyUI extension remains available."
+  "notes": "Draft: the adapter will cut the configured tail, add it as Ref2VA Video 1, keep up to 9 images and 2 extra videos, generate a continuation, trim the context head, and concat source + new part. The standalone ComfyUI extension remains available. SGLang V2V is reference conditioning, not an exact latent guide."
 }
