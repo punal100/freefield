@@ -55,6 +55,7 @@ export type AppManifest = {
   mode_label?: string;
   pack: string;
   status: "draft" | "ready";
+  backend?: "comfyui" | "sglang";
   workflow?: string;
   inputs: Input[];
   presets?: Preset[];
@@ -225,7 +226,7 @@ export function loadRegistry(root = repoRoot()): { apps: App[]; problems: Proble
     if (manifest.id !== folder) {
       problems.push({ app: folder, severity: "error", message: `id "${manifest.id}" must match its folder name` });
     }
-    const app: App = { ...manifest, dir };
+    const app: App = { ...manifest, backend: manifest.backend ?? "comfyui", dir };
     const severity: Problem["severity"] = manifest.status === "ready" ? "error" : "warning";
     if (manifest.workflow) {
       const wp = join(dir, manifest.workflow);
@@ -239,8 +240,8 @@ export function loadRegistry(root = repoRoot()): { apps: App[]; problems: Proble
       } else {
         problems.push({ app: folder, severity, message: `workflow ${manifest.workflow} not found` });
       }
-    } else if (manifest.status === "ready") {
-      problems.push({ app: folder, severity: "error", message: "ready apps need a workflow" });
+    } else if (manifest.status === "ready" && app.backend !== "sglang") {
+      problems.push({ app: folder, severity: "error", message: "ready ComfyUI apps need a workflow" });
     }
     if (app.graph) checkGraph(app, problems, severity);
     apps.push(app);

@@ -38,6 +38,10 @@ browser ──▶ web/ + server/ (Node, Comfy SDK) ──▶ gateway :8000 ─�
 
 ## Status
 
+This fork adds one SGLang-only app, `h3-reference-sglang`; it has no ComfyUI
+workflow and uses the Freefield server's SGLang adapter described in
+`../freefield-sglang-h3-ref2va/README_FREEFIELD.md`.
+
 | | |
 |---|---|
 | Apps | 120: 119 *ready* (39 apps with a workflow of their own, the 5 IC-LoRA apps (`genjutsu`, `reframe`, `sdr-hdr`, `mixed-media`, `dub`), `morph`, 72 template apps (a fixed prompt over one of those pipelines, written by `tools/template_apps.py`) and 2 model-free smoke apps) and `moss-image` as a draft. The 118 that use models each have a lab example made on a GPU |

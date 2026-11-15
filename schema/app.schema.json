@@ -29,6 +29,11 @@
       "enum": ["draft", "ready"],
       "description": "draft: planned, workflow may be missing. ready: workflow present and every binding resolves."
     },
+    "backend": {
+      "enum": ["comfyui", "sglang"],
+      "default": "comfyui",
+      "description": "Execution backend. ComfyUI apps use a workflow; SGLang apps send the form values to the SGLang supervisor and need no ComfyUI workflow."
+    },
     "workflow": {
       "type": "string",
       "pattern": "\\.api\\.json$",

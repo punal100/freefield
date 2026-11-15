@@ -1,0 +1,167 @@
+{
+  "$schema": "../../schema/app.schema.json",
+  "id": "h3-reference-sglang",
+  "name": "H3 Reference Video SGLang",
+  "section": "video",
+  "summary": "Full-BF16 MiniMax H3 Ref2VA through SGLang: one prompt, up to 9 images, 3 videos and 3 audio references, with multi-GPU parallelism and layerwise offload.",
+  "higgsfield_feature": "Reference to Video",
+  "pack": "video-h3-sglang",
+  "status": "ready",
+  "backend": "sglang",
+  "inputs": [
+    {
+      "id": "prompt",
+      "type": "textarea",
+      "label": "Prompt",
+      "required": true,
+      "default": "A cinematic scene using the people, places and style of the reference material.\n\nKeep the identity of <Picture 1> and the look of <Picture 2>. Follow the motion and camera language of <Video 1>. Use <Audio 1> as the sound reference.\n\nNatural movement, coherent physics, clear action, synced sound. No subtitles, no text overlays, no logos.",
+      "help": "Refer to uploads by tag: <Picture 1>-<Picture 9>, <Video 1>-<Video 3>, <Audio 1>-<Audio 3>. Images come first, then videos, then standalone audio."
+    },
+    {
+      "id": "ref_images",
+      "type": "image",
+      "label": "Reference images",
+      "required": false,
+      "help": "Identity, outfit, product or style references, in order.",
+      "multiple": {
+        "max": 9
+      },
+      "limits": {
+        "max_mb": 30
+      }
+    },
+    {
+      "id": "ref_videos",
+      "type": "video",
+      "label": "Reference videos",
+      "required": false,
+      "help": "Motion, camera and performance references. 2-15 s each, 15 s total. The video's original soundtrack is used as its audio reference.",
+      "multiple": {
+        "max": 3
+      },
+      "limits": {
+        "max_mb": 50,
+        "seconds": [
+          2,
+          15
+        ],
+        "total_seconds": 15
+      },
+      "preprocess": "video24"
+    },
+    {
+      "id": "ref_audios",
+      "type": "audio",
+      "label": "Reference audio",
+      "required": false,
+      "help": "Voice, music or sound-style references. An audio reference needs at least one image or video reference.",
+      "multiple": {
+        "max": 3
+      },
+      "limits": {
+        "max_mb": 50
+      }
+    },
+    {
+      "id": "ref_image_size",
+      "type": "select",
+      "label": "Reference detail",
+      "default": "match",
+      "help": "Match is faster. Max keeps a 2048 px short edge for the best identity, but reference tokens can be several times slower.",
+      "options": [
+        {
+          "value": "match",
+          "label": "Match the output (faster)"
+        },
+        {
+          "value": "max",
+          "label": "2048 px (best identity)"
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "type": "select",
+      "label": "Format",
+      "default": "16:9",
+      "options": [
+        {
+          "value": "16:9",
+          "label": "16:9"
+        },
+        {
+          "value": "9:16",
+          "label": "9:16"
+        },
+        {
+          "value": "1:1",
+          "label": "1:1"
+        },
+        {
+          "value": "4:3",
+          "label": "4:3"
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "type": "select",
+      "label": "Resolution",
+      "default": 0.98,
+      "help": "Native is the model training size, 1344x768 at 16:9. Fast is the lighter 864x480 canvas.",
+      "options": [
+        {
+          "value": 0.4,
+          "label": "Fast 864x480 (0.4 MP)"
+        },
+        {
+          "value": 0.98,
+          "label": "Native 1344x768 (0.98 MP)"
+        }
+      ]
+    },
+    {
+      "id": "duration",
+      "type": "slider",
+      "label": "Duration (s)",
+      "min": 4,
+      "max": 15,
+      "step": 1,
+      "default": 5
+    },
+    {
+      "id": "steps",
+      "type": "slider",
+      "label": "Steps",
+      "min": 8,
+      "max": 50,
+      "step": 1,
+      "default": 50,
+      "help": "Fewer steps run faster and look rougher."
+    },
+    {
+      "id": "seed",
+      "type": "seed",
+      "label": "Seed",
+      "default": -1,
+      "help": "-1 picks a random seed"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "sglang",
+      "type": "video",
+      "label": "Video"
+    }
+  ],
+  "models": [],
+  "credits": [
+    "MiniMax H3 (MiniMax H3 Community License)",
+    "SGLang"
+  ],
+  "test": {
+    "prompt": "a cat yawns on a sunny windowsill",
+    "duration": 4
+  },
+  "notes": "SGLang Ref2VA backend. The supervisor downloads the native full-BF16 Ref2VA tree on first use and keeps the DiT resident on a 96 GB-class GPU; smaller GPUs use layerwise DiT streaming. Set H3_PROFILE, H3_NUM_GPUS and H3_ULYSSES_DEGREE on the container."
+}

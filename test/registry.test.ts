@@ -9,10 +9,18 @@ test("every manifest passes the schema and its bindings resolve", () => {
   assert.deepEqual(errors, []);
 });
 
-test("ready apps all have a workflow on disk", () => {
-  for (const app of apps.filter((a) => a.status === "ready")) {
+test("ready ComfyUI apps have a workflow on disk", () => {
+  for (const app of apps.filter((a) => a.status === "ready" && a.backend !== "sglang")) {
     assert.ok(app.graph, `${app.id} has no workflow loaded`);
   }
+});
+
+test("the SGLang app is registered without a ComfyUI workflow", () => {
+  const app = apps.find((a) => a.id === "h3-reference-sglang");
+  assert.ok(app);
+  assert.equal(app.backend, "sglang");
+  assert.equal(app.workflowPath, undefined);
+  assert.equal(app.outputs[0].type, "video");
 });
 
 test("folder name and id agree, ids are unique", () => {

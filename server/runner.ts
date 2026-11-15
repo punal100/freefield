@@ -7,6 +7,8 @@ import { extname, join } from "node:path";
 import { Comfy } from "@comfyorg/sdk";
 import type { App, Input } from "./registry.ts";
 import { isFileInput, modelKey } from "./registry.ts";
+import type { JobLike } from "./history.ts";
+import { SglangClient, SglangJob } from "./sglang.ts";
 
 export type FileValue = { bytes: Uint8Array; name: string; type?: string };
 export type Values = Record<string, unknown>;
@@ -371,15 +373,22 @@ export type RunnerOptions = {
   token?: string;
   /** Let draft apps run too (default: FREEFIELD_DRAFTS=1). Drafts have a workflow nobody has run on a GPU yet. */
   allowDrafts?: boolean;
+  /** SGLang supervisor, e.g. http://127.0.0.1:39980. SGLang apps are unavailable without it. */
+  sglangBaseUrl?: string;
+  /** Token the SGLang supervisor expects. Default: SGLANG_API_TOKEN, then H3_API_TOKEN. */
+  sglangToken?: string;
   fetch?: typeof fetch;
+  sglangFetch?: typeof fetch;
 };
 
 export class Runner {
   readonly baseUrl: string;
   readonly token?: string;
   readonly allowDrafts: boolean;
+  readonly sglang?: SglangClient;
   private comfy: Comfy;
   private doFetch: typeof fetch;
+  private sglangJobs = new Map<string, SglangJob>();
 
   constructor(opts: RunnerOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? process.env.COMFY_BASE_URL ?? "").replace(/\/$/, "");
@@ -389,6 +398,14 @@ export class Runner {
     process.env.COMFY_BASE_URL = this.baseUrl; // the SDK reads its base URL from the environment
     this.doFetch = opts.fetch ?? fetch;
     this.comfy = new Comfy({ apiKey: this.token, clientInfo: "freefield", fetch: opts.fetch });
+    const sglangBaseUrl = (opts.sglangBaseUrl ?? process.env.SGLANG_BASE_URL ?? "").replace(/\/$/, "");
+    if (sglangBaseUrl) {
+      this.sglang = new SglangClient({
+        baseUrl: sglangBaseUrl,
+        token: opts.sglangToken ?? process.env.SGLANG_API_TOKEN ?? process.env.H3_API_TOKEN,
+        fetch: opts.sglangFetch ?? opts.fetch,
+      });
+    }
   }
 
   /**
@@ -412,14 +429,22 @@ export class Runner {
   }
 
   async submit(app: App, rawValues: Values, presetId?: string) {
-    if (!app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
+    if (app.backend !== "sglang" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
     if (app.status !== "ready" && !this.allowDrafts) {
       throw new InputError(`${app.id} is a draft; set FREEFIELD_DRAFTS=1 (or pass --draft) to run it anyway`);
     }
     const values = resolveValues(app, rawValues);
     preflightMedia(app, values);
+    if (app.backend === "sglang") {
+      if (!this.sglang) throw new InputError(`${app.id} needs SGLANG_BASE_URL`);
+      await this.prepare(app);   // free the ComfyUI models before SGLang loads
+      const job = await this.sglang.submit(app, values);
+      this.sglangJobs.set(job.id, job);
+      return job;
+    }
+    if (this.sglang) await this.sglang.unload();   // one GPU pipeline at a time
     await this.prepare(app);
-    const wf = await this.comfy.workflows.fromFile(app.workflowPath);
+    const wf = await this.comfy.workflows.fromFile(app.workflowPath!);
     applyInputs(
       app,
       values,
@@ -434,13 +459,37 @@ export class Runner {
     return this.comfy.jobs;
   }
 
+  /** Resolve a job id after a restart, using the app's backend when known. */
+  async getJob(id: string, backend?: "comfyui" | "sglang"): Promise<JobLike> {
+    if (backend === "sglang") {
+      const known = this.sglangJobs.get(id);
+      if (known) return known;
+      if (!this.sglang) throw new Error("SGLANG_BASE_URL is not set");
+      const job = new SglangJob(this.sglang, id);
+      this.sglangJobs.set(id, job);
+      return job;
+    }
+    if (backend === "comfyui") return this.comfy.jobs.get(id);
+    const known = this.sglangJobs.get(id);
+    if (known) return known;
+    try {
+      return await this.comfy.jobs.get(id);
+    } catch (e) {
+      if (!this.sglang) throw e;
+      const job = new SglangJob(this.sglang, id);
+      this.sglangJobs.set(id, job);
+      return job;
+    }
+  }
+
   /**
    * The job's event stream (GET /api/v2/jobs/{id}/events) read as it comes, frame by frame, without the SDK's
    * job.events(): that one drops any progress frame lower than the last, and comfy-api-proxy's first frames
    * can say 1.0 (history.ts, Meter). Reconnects while the signal is alive; a stream that answers anything
    * but 200 (the job is gone) ends quietly: the poll decides.
    */
-  async *frames(jobId: string, signal: AbortSignal): AsyncIterable<Frame> {
+  async *frames(jobId: string, signal: AbortSignal, backend?: "comfyui" | "sglang"): AsyncIterable<Frame> {
+    if (backend === "sglang" || this.sglangJobs.has(jobId)) return;
     const url = `${this.baseUrl}/api/v2/jobs/${encodeURIComponent(jobId)}/events`;
     const headers = { accept: "text/event-stream", ...(this.token ? { authorization: `Bearer ${this.token}` } : {}) };
     let failures = 0;

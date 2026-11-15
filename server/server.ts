@@ -57,10 +57,14 @@ const history = new History(join(outDir, "history"), {
   appInfo: (id) => {
     const app = apps.find((a) => a.id === id);
     if (!app) return undefined;
+    if (app.backend === "sglang") return { outputs: app.outputs.map((o) => o.node), nodes: 1, classOf: () => "SGLang" };
     const graph = app.graph ?? {};
     return { outputs: app.outputs.map((o) => o.node), nodes: Object.keys(graph).length, classOf: (n) => graph[n]?.class_type ?? null };
   },
-  frames: (jobId, signal) => getRunner().frames(jobId, signal),
+  frames: (jobId, signal, appId) => {
+    const backend = apps.find((a) => a.id === appId)?.backend;
+    return getRunner().frames(jobId, signal, backend);
+  },
 });
 const flags = new Flags(join(root, "lab", "flags.json"), apps);
 
@@ -82,11 +86,14 @@ function loadExamples(): Record<string, unknown> {
   }
 }
 
-const runnable = (a: App) => Boolean(a.workflowPath) && (a.status === "ready" || draftsAllowed);
+const runnable = (a: App) => a.backend === "sglang"
+  ? Boolean(process.env.SGLANG_BASE_URL) && (a.status === "ready" || draftsAllowed)
+  : Boolean(a.workflowPath) && (a.status === "ready" || draftsAllowed);
 
 function publicApp(a: App) {
   return {
     id: a.id, name: a.name, section: a.section, summary: a.summary ?? "", status: a.status, pack: a.pack,
+    backend: a.backend,
     runnable: runnable(a),
     higgsfield_feature: a.higgsfield_feature ?? null,
     modes: a.modes ?? null,
@@ -174,12 +181,15 @@ async function readValues(app: App, request: Request): Promise<{ values: Values;
 }
 
 async function jobView(id: string) {
-  const job = await getRunner().jobs().get(id);
+  const job = await getRunner().getJob(id);
   return {
     id: job.id,
     status: job.status,
     error: job.error ?? null,
-    outputs: job.outputs.map((o) => ({ id: o.id, node: o.nodeId, name: o.name, type: o.type, url: `/api/jobs/${job.id}/outputs/${o.id}` })),
+    outputs: job.outputs.map((o, index) => {
+      const id = o.id ?? `${job.id}-${index}`;
+      return { id, node: o.nodeId, name: o.name, type: o.type, url: `/api/jobs/${job.id}/outputs/${id}` };
+    }),
   };
 }
 
@@ -288,8 +298,8 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST" && area === "apps" && sub === "run") {
         const app = byId.get(id);
         if (!app) return send(res, 404, { error: "unknown app" });
-        if (!app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
-        if (!runnable(app)) throw new InputError(`${app.id} is a draft; start the server with FREEFIELD_DRAFTS=1 to run it anyway`);
+        if (app.backend !== "sglang" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
+        if (!runnable(app)) throw new InputError(`${app.id} is a draft or its backend is not configured; start the server with FREEFIELD_DRAFTS=1 and set SGLANG_BASE_URL for SGLang apps`);
         const refused = guard.refuse(activeRuns());
         if (refused) return send(res, 429, { error: refused });
         const { values, preset } = await readValues(app, await toRequest(req));
@@ -340,8 +350,8 @@ const server = createServer(async (req, res) => {
         return send(res, 200, await jobView(id));
       }
       if (req.method === "GET" && area === "jobs" && sub === "outputs" && arg) {
-        const job = await getRunner().jobs().get(id);
-        const out = job.outputs.find((o) => o.id === arg);
+        const job = await getRunner().getJob(id);
+        const out = job.outputs.find((o, index) => (o.id ?? `${job.id}-${index}`) === arg);
         if (!out) return send(res, 404, { error: "unknown output" });
         const bytes = await out.toBytes();
         res.writeHead(200, { "content-type": out.contentType || "application/octet-stream", "content-length": bytes.byteLength });
@@ -363,7 +373,7 @@ const server = createServer(async (req, res) => {
 });
 
 // runs that were still going when the server stopped are followed again
-history.resume(async (jobId) => getRunner().jobs().get(jobId));
+history.resume(async (jobId, appId) => getRunner().getJob(jobId, apps.find((a) => a.id === appId)?.backend));
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.FREEFIELD_HOST || "127.0.0.1";

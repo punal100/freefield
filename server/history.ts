@@ -39,7 +39,7 @@ export type Entry = {
 export type JobLike = {
   readonly id: string;
   readonly status: string;
-  readonly outputs: readonly { name: string; type: string; nodeId: string; contentType: string; toBytes(): Promise<Uint8Array> }[];
+  readonly outputs: readonly { id?: string; name: string; type: string; nodeId: string; contentType: string; toBytes(): Promise<Uint8Array> }[];
   readonly error: { message?: string; class_type?: string | null; node_id?: string | null } | null | undefined;
   readonly startedAt: Date | null;
   readonly completedAt: Date | null;
@@ -59,7 +59,7 @@ export type HistoryOptions = {
   onContact?: () => void;
   appInfo?: (appId: string) => AppInfo | undefined;
   /** The raw event stream of a job, read without the SDK (see Meter). Absent: job.events() is used. */
-  frames?: (jobId: string, signal: AbortSignal) => AsyncIterable<Frame>;
+  frames?: (jobId: string, signal: AbortSignal, app?: string) => AsyncIterable<Frame>;
 };
 
 type Live = {
@@ -204,7 +204,7 @@ export class History {
   readonly dir: string;
   private onContact: () => void;
   private appInfo: (appId: string) => AppInfo | undefined;
-  private frames?: (jobId: string, signal: AbortSignal) => AsyncIterable<Frame>;
+  private frames?: (jobId: string, signal: AbortSignal, app?: string) => AsyncIterable<Frame>;
 
   constructor(dir: string, opts: HistoryOptions = {}) {
     this.dir = dir;
@@ -281,7 +281,7 @@ export class History {
     const stream = (async () => {
       try {
         if (this.frames) {
-          for await (const f of this.frames(job.id, stop.signal)) {
+          for await (const f of this.frames(job.id, stop.signal, entry.app)) {
             this.onContact();
             if (f.event === "progress") {
               live.progress = meter.feed(f.data);
@@ -382,7 +382,7 @@ export class History {
    * from its id). Runs that never got a job id, or are too old for the backend to still hold them,
    * are marked lost without asking it: asking would start a GPU just to hear the job is gone.
    */
-  resume(getJob: (id: string) => Promise<JobLike>, maxAgeMs = 60 * 60 * 1000): void {
+  resume(getJob: (id: string, app?: string) => Promise<JobLike>, maxAgeMs = 60 * 60 * 1000): void {
     for (const entry of this.entries()) {
       if (TERMINAL.has(entry.status)) continue;
       if (!entry.job) {
@@ -394,7 +394,7 @@ export class History {
         continue;
       }
       this.live.set(entry.id, { progress: null, queue: null, preview: null });
-      getJob(entry.job)
+      getJob(entry.job, entry.app)
         .then((job) => this.follow(entry, job))
         .catch((e) => this.fail(entry, `could not pick this run up again: ${(e as Error).message}`, "lost"));
     }
