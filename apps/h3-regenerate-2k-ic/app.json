@@ -1,0 +1,96 @@
+{
+  "$schema": "../../schema/app.schema.json",
+  "id": "h3-regenerate-2k-ic",
+  "name": "H3 Regenerate 2K IC",
+  "section": "video",
+  "summary": "Regenerates a 768p H3 draft at 1080p, 2K or 4K with the Open-H3-Regenerate-2K-IC in-context refiner.",
+  "higgsfield_feature": "Upscale Video",
+  "pack": "video-h3-ic",
+  "status": "draft",
+  "inputs": [
+    {
+      "id": "draft",
+      "type": "video",
+      "label": "768p draft",
+      "required": true,
+      "help": "A 768p-class H3 draft. The draft stays in context while the IC LoRA regenerates it at the selected size.",
+      "limits": {
+        "max_mb": 50,
+        "seconds": [4, 15]
+      }
+    },
+    {
+      "id": "prompt",
+      "type": "textarea",
+      "label": "Original prompt",
+      "required": false,
+      "help": "Pass the caption that generated the draft, unchanged. It may be empty."
+    },
+    {
+      "id": "quality",
+      "type": "select",
+      "label": "Quality",
+      "default": "balanced",
+      "help": "Sets the sampler and VAE defaults below. Advanced controls can override them.",
+      "options": [
+        { "value": "fast", "label": "Fast — 1080p, up3, fast VAE" },
+        { "value": "balanced", "label": "Balanced — 2K, up4, fast VAE" },
+        { "value": "maximum", "label": "Maximum — 2K, hf8, standard VAE" }
+      ]
+    },
+    {
+      "id": "resolution",
+      "type": "select",
+      "label": "Output size",
+      "default": "2k",
+      "help": "Actual dimensions follow the draft aspect ratio. 4K is gated by available GPU memory.",
+      "options": [
+        { "value": "1080p", "label": "1080p" },
+        { "value": "2k", "label": "2K (2560×1440 at 16:9)" },
+        { "value": "4k", "label": "4K (3840×2160 at 16:9)" }
+      ]
+    },
+    {
+      "id": "sampler",
+      "type": "select",
+      "label": "Sampler",
+      "default": "up4",
+      "help": "up3 and up4 use the 3D latent upscaler; hf8 starts from noise and runs all eight HyperFlow steps.",
+      "options": [
+        { "value": "up3", "label": "up3 — 3 steps" },
+        { "value": "up4", "label": "up4 — 4 steps" },
+        { "value": "hf8", "label": "hf8 — 8 steps" }
+      ]
+    },
+    {
+      "id": "sharp",
+      "type": "slider",
+      "label": "LMS Sharp",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 1,
+      "help": "LMS Sharp strength. 0 disables the sharpening LoRA."
+    },
+    {
+      "id": "vae",
+      "type": "select",
+      "label": "Decoder",
+      "default": "fast",
+      "help": "Fast VAE is the default for 1080p/2K; standard VAE favors fidelity and is required for 4K.",
+      "options": [
+        { "value": "fast", "label": "Fast VAE" },
+        { "value": "standard", "label": "Standard H3 VAE" }
+      ]
+    }
+  ],
+  "outputs": [
+    { "node": "open-h3-ic", "type": "video", "label": "Regenerated video" }
+  ],
+  "models": [],
+  "credits": [
+    "Open-H3-Regenerate-2K-IC (MiniMax H3 Community License)",
+    "MiniMax H3 (MiniMax H3 Community License)"
+  ],
+  "notes": "Draft frontend for the separate Open-H3-Regenerate-2K-IC sidecar. The exact latent upscaler and sigma grid are not exposed by SGLang; wire this app to the sidecar when the IC image is baked."
+}

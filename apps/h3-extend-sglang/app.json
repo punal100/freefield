@@ -1,0 +1,81 @@
+{
+  "$schema": "../../schema/app.schema.json",
+  "id": "h3-extend-sglang",
+  "name": "H3 Extend SGLang",
+  "section": "video",
+  "summary": "Continues an existing clip through SGLang Ref2VA, using the tail as motion context and joining the new part after it.",
+  "higgsfield_feature": "Extend Video",
+  "pack": "video-h3-sglang",
+  "status": "draft",
+  "backend": "sglang",
+  "inputs": [
+    {
+      "id": "clip",
+      "type": "video",
+      "label": "Clip to extend",
+      "required": true,
+      "help": "At least 2 seconds. The continuation is appended after this clip.",
+      "limits": {
+        "max_mb": 50,
+        "seconds": [2, 15]
+      },
+      "preprocess": "video24"
+    },
+    {
+      "id": "prompt",
+      "type": "textarea",
+      "label": "Prompt",
+      "required": true,
+      "default": "The scene continues naturally: same people, place, light and camera style.",
+      "help": "Describe what happens next. The last frames are used as the motion context."
+    },
+    {
+      "id": "duration",
+      "type": "slider",
+      "label": "New part (s)",
+      "min": 2,
+      "max": 10,
+      "step": 1,
+      "default": 5,
+      "help": "Length of the generated part before the motion context is trimmed."
+    },
+    {
+      "id": "context",
+      "type": "select",
+      "label": "Motion context",
+      "default": 39,
+      "help": "Frames carried into the new clip. 39 frames is the community standard.",
+      "options": [
+        { "value": 5, "label": "5 frames (0.2 s)" },
+        { "value": 22, "label": "22 frames (0.9 s)" },
+        { "value": 39, "label": "39 frames (1.6 s), recommended" }
+      ]
+    },
+    {
+      "id": "steps",
+      "type": "slider",
+      "label": "Steps",
+      "min": 8,
+      "max": 50,
+      "step": 1,
+      "default": 50,
+      "help": "Fewer steps run faster and look rougher."
+    },
+    {
+      "id": "seed",
+      "type": "seed",
+      "label": "Seed",
+      "default": -1,
+      "help": "-1 picks a random seed"
+    }
+  ],
+  "outputs": [
+    { "node": "sglang", "type": "video", "label": "Extended video" }
+  ],
+  "models": [],
+  "credits": [
+    "MiniMax H3 (MiniMax H3 Community License)",
+    "SGLang"
+  ],
+  "notes": "Draft: the SGLang extension adapter and source+continuation concat are planned. The standalone ComfyUI extension remains available."
+}

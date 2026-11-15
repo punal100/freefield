@@ -1148,7 +1148,8 @@ function mainArea(app, layout, disposers) {
   denseBtn.onclick = () => { dense = !dense; store.set("dense", dense); denseBtn.setAttribute("aria-pressed", String(dense)); draw(); };
   draw();
   disposers.push(() => disposeBody?.());
-  return el("section", { class: "ws-main" }, el("div", { class: "ws-top" }, tabs, el("div", { class: "right" }, denseBtn)), body);
+  const flowLink = app.id === "h3-reference-sglang" ? el("a", { class: "btn ghost small", href: "#/flow/h3" }, icon("layers"), t("flow.open")) : null;
+  return el("section", { class: "ws-main" }, el("div", { class: "ws-top" }, tabs, el("div", { class: "right" }, flowLink, denseBtn)), body);
 }
 
 // ------------------------------------------------------------------ the view
