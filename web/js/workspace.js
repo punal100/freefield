@@ -333,6 +333,10 @@ export function useIn(anchor, item, done) {
     try {
       const ext = extOf(item.full) || (type === "video" ? "mp4" : "png");
       if (!setFile(a, slotOf(a), await fileFromUrl(item.full, `${item.app || "result"}.${ext}`))) return;
+      if (a.id === "h3-regenerate-2k-ic" && item.values?.prompt) {
+        formFor(a).values.prompt = String(item.values.prompt);
+        persist(a);
+      }
       if (location.hash !== `#/app/${a.id}`) location.hash = `#/app/${a.id}`;
       else hooks.rerender?.();
       toast(t("toast.sent", { app: a.name }));
