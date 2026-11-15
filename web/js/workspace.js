@@ -822,6 +822,100 @@ function presetField(app, f) {
   return el("div", { class: "field" }, el("span", { class: "lbl" }, t("ws.preset")), seg);
 }
 
+const SIDE_MIN = 280;
+const SIDE_MAX = 680;
+const SIDE_DEFAULT = 340;
+
+function sideMax() {
+  return Math.min(SIDE_MAX, Math.max(SIDE_MIN + 120, window.innerWidth - 320));
+}
+
+function clampSideWidth(width) {
+  const value = Number(width);
+  return Math.max(SIDE_MIN, Math.min(sideMax(), Number.isFinite(value) ? value : SIDE_DEFAULT));
+}
+
+function sideResizer(side) {
+  const handle = el("div", {
+    class: "side-resizer",
+    role: "separator",
+    tabindex: "0",
+    "aria-orientation": "vertical",
+    "aria-label": t("ws.resize"),
+    title: t("ws.resize"),
+    "aria-valuemin": String(SIDE_MIN),
+    "aria-valuemax": String(sideMax()),
+    "aria-valuenow": String(clampSideWidth(store.get("side.w", SIDE_DEFAULT))),
+  });
+  const apply = (width) => {
+    const root = side.closest(".ws");
+    const next = clampSideWidth(width);
+    root?.style.setProperty("--side-w", `${next}px`);
+    handle.setAttribute("aria-valuenow", String(Math.round(next)));
+    handle.setAttribute("aria-valuemax", String(Math.round(sideMax())));
+    return next;
+  };
+  const current = () => measureSideWidth(side);
+  let dragging = false;
+  let startX = 0;
+  let startWidth = SIDE_DEFAULT;
+
+  const finish = () => {
+    if (!dragging) return;
+    dragging = false;
+    side.closest(".ws")?.classList.remove("resizing");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    store.set("side.w", Math.round(current()));
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", finish);
+    window.removeEventListener("pointercancel", finish);
+  };
+  const move = (e) => {
+    if (!dragging) return;
+    apply(startWidth + e.clientX - startX);
+  };
+
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragging = true;
+    startX = e.clientX;
+    startWidth = current();
+    side.closest(".ws")?.classList.add("resizing");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    handle.focus();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  });
+
+  handle.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 48 : 16;
+    let delta = 0;
+    if (e.key === "ArrowLeft") delta = -step;
+    else if (e.key === "ArrowRight") delta = step;
+    else if (e.key === "Home") return (e.preventDefault(), storeSideWidth(apply(SIDE_MIN)));
+    else if (e.key === "End") return (e.preventDefault(), storeSideWidth(apply(sideMax())));
+    if (!delta) return;
+    e.preventDefault();
+    storeSideWidth(apply(current() + delta));
+  });
+
+  handle.addEventListener("dblclick", () => storeSideWidth(apply(SIDE_DEFAULT)));
+  return handle;
+}
+
+function measureSideWidth(side) {
+  const width = side.getBoundingClientRect().width;
+  return width ? width : clampSideWidth(store.get("side.w", SIDE_DEFAULT));
+}
+
+function storeSideWidth(width) {
+  store.set("side.w", Math.round(width));
+}
+
 function sidebarPanel(app, rerenderSide) {
   const f = formFor(app);
   const ui = { refs: {} };
@@ -835,9 +929,9 @@ function sidebarPanel(app, rerenderSide) {
       if (target) location.hash = `#/app/${target}`;
     } }, t(`vtab.${vt.id}`)))) : null;
 
-  const card = el("div", { class: "model-card", role: "button", tabindex: "0", "aria-label": `${t("ws.change")}: ${app.name}` });
   const ex = exampleItem(app);
-  const cardMedia = thumb(ex, { play: "visible" });
+  const card = el("div", { class: `model-card${ex ? "" : " empty"}`, role: "button", tabindex: "0", "aria-label": `${t("ws.change")}: ${app.name}` });
+  const cardMedia = ex ? thumb(ex, { play: "visible" }) : el("div", { class: "media" }, el("span", { class: "placeholder" }, icon(iconOf(app))));
   card.append(cardMedia, el("div", { class: "txt" }, el("h3", { class: "display" }, app.name), el("p", {}, tagline(app))));
   const change = el("button", { class: "change", type: "button" }, icon("swap"), t("ws.change"));
   const openSwitch = (ev) => { ev.stopPropagation(); popover(change, switcher(app), { width: 340 }); };
@@ -867,6 +961,7 @@ function sidebarPanel(app, rerenderSide) {
   const go = async () => { if (await submit(app, ui) && wsTab !== "history") { wsTab = "history"; hooks.rerender?.(); } };
   const foot = el("div", { class: "side-foot" }, el("div", { class: "row" }, countControl(f), genButton(app, go)), note);
   const side = el("aside", { class: "side", "aria-label": app.name }, tabs, scroll, foot);
+  side.append(sideResizer(side));
   side.addEventListener("dragover", (e) => e.preventDefault());
   side.addEventListener("drop", (e) => { e.preventDefault(); if (assignFiles(app, e.dataTransfer.files)) rerenderSide(); });
   return side;
@@ -1053,6 +1148,15 @@ export function workspaceView(appId) {
   const layout = layoutOf(app);
   const disposers = [];
   const root = el("div", { class: `ws l-${layout}` });
+  if (layout === "sidebar") root.style.setProperty("--side-w", `${clampSideWidth(store.get("side.w", SIDE_DEFAULT))}px`);
+  const clampRootSide = () => {
+    if (layout !== "sidebar") return;
+    const width = parseFloat(getComputedStyle(root).getPropertyValue("--side-w"));
+    const next = clampSideWidth(width);
+    if (Number.isFinite(width) && next !== width) root.style.setProperty("--side-w", `${next}px`);
+  };
+  window.addEventListener("resize", clampRootSide);
+  disposers.push(() => window.removeEventListener("resize", clampRootSide));
 
   if (layout === "composer") {
     let bar = null;
