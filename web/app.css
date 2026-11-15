@@ -399,6 +399,11 @@ input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border: 0; bo
 .ref-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ref-note { font-size: 11.5px; color: var(--dim); }
 .ref-note.warn { color: var(--warn); }
+.ref-audio { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; width: max-content; margin-top: 2px; color: var(--dim); font-size: 11.5px; }
+.ref-audio.off { opacity: .45; }
+.ref-audio .switch { width: 30px; height: 18px; }
+.ref-audio .switch i::after { top: 3px; left: 3px; width: 12px; height: 12px; }
+.ref-audio .switch input:checked + i::after { transform: translateX(12px); }
 .ref-ctl { display: flex; gap: 4px; }
 .ref-add { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border-radius: 10px; border: 1px dashed #2e2e33;
   background: transparent; color: var(--dim); cursor: pointer; font: inherit; }

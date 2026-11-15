@@ -90,6 +90,11 @@ test("unload waits until the supervisor has released the model", async () => {
   assert.ok(backend.requests.some((r) => r.url.endsWith("/v1/model/status")));
 });
 
+test("per-video audio flags survive server value resolution", () => {
+  const values = resolveValues(app, { prompt: "x", seed: 1, ref_video_audio_flags: "[true,false,true]" });
+  assert.equal(values.ref_video_audio_flags, "[true,false,true]");
+});
+
 test("an SGLang app without a reference is rejected before submission", async () => {
   const backend = fakeBackend();
   const runner = new Runner({

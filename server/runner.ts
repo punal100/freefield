@@ -133,6 +133,7 @@ export function resolveValues(app: App, values: Values): Values {
     }
     out[input.id] = coerce(input, v);
   }
+  if (typeof values.ref_video_audio_flags === "string") out.ref_video_audio_flags = values.ref_video_audio_flags;
   return out;
 }
 
@@ -326,6 +327,16 @@ async function transcode24(file: FileValue, probe: MediaProbe, keepAudio: boolea
 export async function preflightMedia(app: App, values: Values): Promise<void> {
   const sglang = app.backend === "sglang";
   const keepVideoAudio = values.ref_video_audio !== false && values.ref_video_audio !== "false";
+  let perVideoAudio: unknown[] = [];
+  if (typeof values.ref_video_audio_flags === "string" && values.ref_video_audio_flags) {
+    try {
+      const parsed = JSON.parse(values.ref_video_audio_flags);
+      if (!Array.isArray(parsed)) throw new Error("not a list");
+      perVideoAudio = parsed;
+    } catch {
+      throw new InputError("ref_video_audio_flags: expected a list of booleans");
+    }
+  }
   for (const input of app.inputs) {
     const raw = values[input.id];
     if (raw === undefined) continue;
@@ -371,7 +382,7 @@ export async function preflightMedia(app: App, values: Values): Promise<void> {
       if (min !== undefined && probe.seconds < min - EPS) throw new InputError(`${input.id}: ${files[i].name} is ${probe.seconds.toFixed(1)} s; the minimum is ${min} s`);
       if (max !== undefined && probe.seconds > max + EPS) throw new InputError(`${input.id}: ${files[i].name} is ${probe.seconds.toFixed(1)} s; the maximum is ${max} s`);
       total += probe.seconds;
-      if (input.preprocess === "video24") files[i] = await transcode24(files[i], probe, keepVideoAudio);
+      if (input.preprocess === "video24") files[i] = await transcode24(files[i], probe, keepVideoAudio && perVideoAudio[i] !== false);
     }
     const totalMax = input.limits?.total_seconds;
     if (totalMax && total > totalMax + EPS) throw new InputError(`${input.id}: the clips are ${total.toFixed(1)} s together; the maximum is ${totalMax} s`);

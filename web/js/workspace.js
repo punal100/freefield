@@ -139,7 +139,7 @@ function setFile(app, inp, file) {
       toast(`${inp.label}: at most ${max}`, { error: true });
       return false;
     }
-    list.push({ file, url: URL.createObjectURL(file) });
+    list.push({ file, url: URL.createObjectURL(file), keepAudio: true });
   } else {
     if (f.files[inp.id]) URL.revokeObjectURL(f.files[inp.id].url);
     f.files[inp.id] = { file, url: URL.createObjectURL(file) };
@@ -162,7 +162,7 @@ function replaceFile(app, inp, file, index) {
   const list = formFor(app).files[inp.id];
   if (!Array.isArray(list) || index < 0 || index >= list.length) return false;
   URL.revokeObjectURL(list[index].url);
-  list[index] = { file, url: URL.createObjectURL(file) };
+  list[index] = { file, url: URL.createObjectURL(file), keepAudio: list[index].keepAudio !== false };
   dropMasksOf(app, inp.id);
   return true;
 }
@@ -242,6 +242,10 @@ function buildForm(app, { randomSeed = false } = {}) {
     if (v === "" && inp.type === "select" && (inp.options || []).some((o) => o.value === "")) { fd.append(inp.id, ""); continue; }
     if (v === "" || v === null || v === undefined) continue;
     fd.append(inp.id, String(v));
+  }
+  if (app.inputs.some((i) => i.id === "ref_video_audio")) {
+    const videos = f.files.ref_videos ?? [];
+    if (videos.length) fd.append("ref_video_audio_flags", JSON.stringify(videos.map((x) => x.keepAudio !== false)));
   }
   if (f.preset) fd.append("preset", f.preset);
   return fd;
@@ -662,6 +666,7 @@ function multiDropzone(app, inp, rerender) {
   if (inp.limits?.total_mb) bits.push(`${inp.limits.total_mb} MB total`);
   const note = el("small", { class: "faint" }, bits.join(" · "));
 
+  const hasAudioSwitch = inp.type === "video" && app.inputs.some((item) => item.id === "ref_video_audio");
   const tile = (x, i) => {
     const media = inp.type === "image" ? el("img", { src: x.url, alt: "" })
       : inp.type === "video" ? el("video", { src: x.url, muted: true, loop: true, playsinline: true, autoplay: true, preload: "auto" })
@@ -677,6 +682,14 @@ function multiDropzone(app, inp, rerender) {
         }
       });
     }
+    const masterAudio = f.values.ref_video_audio !== false;
+    const audioSwitch = hasAudioSwitch ? (() => {
+      const box = el("input", { type: "checkbox", checked: masterAudio && x.keepAudio !== false, disabled: !masterAudio, role: "switch",
+        "aria-label": `${t("ws.audio")} <Video ${i + 1}>`, title: masterAudio ? t("ws.audio.keep") : t("ws.audio.master") });
+      box.addEventListener("change", () => { x.keepAudio = box.checked; });
+      return el("label", { class: `ref-audio${masterAudio ? "" : " off"}`, title: masterAudio ? t("ws.audio.keep") : t("ws.audio.master") },
+        el("span", {}, t("ws.audio")), el("span", { class: "switch" }, box, el("i")));
+    })() : null;
     const move = (to) => {
       if (to < 0 || to >= list.length) return;
       const [item] = list.splice(i, 1);
@@ -685,7 +698,7 @@ function multiDropzone(app, inp, rerender) {
     };
     return el("div", { class: "ref-item", dataset: { slot: inp.id } },
       el("div", { class: "ref-media" }, media),
-      el("div", { class: "ref-txt" }, el("b", {}, `<${REF_TAG[inp.type]} ${i + 1}>`), el("span", { class: "ref-name" }, x.file.name), warn),
+      el("div", { class: "ref-txt" }, el("b", {}, `<${REF_TAG[inp.type]} ${i + 1}>`), el("span", { class: "ref-name" }, x.file.name), warn, audioSwitch),
       el("div", { class: "ref-ctl" },
         el("button", { class: "mini", type: "button", title: t("ws.replace"), "aria-label": t("ws.replace"), onclick: () => { replaceIndex = i; replaceInput.click(); } }, icon("swap")),
         el("button", { class: "mini", type: "button", title: "Move up", "aria-label": "Move up", onclick: () => move(i - 1), disabled: i === 0 }, "↑"),
@@ -758,7 +771,7 @@ function dropzone(app, inp, rerender) {
   return zone;
 }
 
-function sideField(app, inp, f, ui) {
+function sideField(app, inp, f, ui, onChange = null) {
   const set = (v) => { f.values[inp.id] = v; persistSoon(); };
   const help = inp.help ? el("p", { class: "help" }, inp.help) : null;
   if (inp.type === "textarea") {
@@ -794,7 +807,7 @@ function sideField(app, inp, f, ui) {
   if (inp.type === "slider") return el("div", { class: "field" }, rangeInput(inp, f.values[inp.id], set), help);
   if (inp.type === "toggle") {
     const box = el("input", { type: "checkbox", checked: Boolean(f.values[inp.id]), "aria-label": inp.label });
-    box.addEventListener("change", () => set(box.checked));
+    box.addEventListener("change", () => { set(box.checked); onChange?.(); });
     return el("label", { class: "field" }, el("span", { class: "togrow" }, el("span", { class: "t" }, el("b", { style: { fontSize: "13px" } }, inp.label),
       inp.help ? el("small", {}, inp.help) : null), el("span", { class: "switch" }, box, el("i"))));
   }
@@ -943,7 +956,7 @@ function sidebarPanel(app, rerenderSide) {
   const main = [], adv = [];
   for (const inp of app.inputs) {
     if (isMedia(inp.type)) main.push(dropzone(app, inp, rerenderSide));
-    else (isAdvanced(inp) ? adv : main).push(sideField(app, inp, f, ui));
+    else (isAdvanced(inp) ? adv : main).push(sideField(app, inp, f, ui, inp.id === "ref_video_audio" ? rerenderSide : null));
   }
   if (app.presets?.length) adv.unshift(presetField(app, f));
   if (app.inputs.some((i) => i.type === "video" || i.type === "audio")) main.push(refBudget(app));

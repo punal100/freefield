@@ -176,6 +176,8 @@ async function readValues(app: App, request: Request): Promise<{ values: Values;
     if (v === null) continue;
     values[input.id] = v;
   }
+  const audioFlags = form.get("ref_video_audio_flags");
+  if (typeof audioFlags === "string" && audioFlags) values.ref_video_audio_flags = audioFlags;
   const preset = form.get("preset");
   return { values, preset: typeof preset === "string" && preset ? preset : undefined };
 }
