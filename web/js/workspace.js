@@ -316,6 +316,8 @@ export async function recreate(item, { run = false } = {}) {
 }
 
 /** Where a result usually goes next, by the kind of file it is (the rest of the apps that take it follow). */
+let pendingICPrompt = "";
+
 const NEXT = {
   image: ["video", "motion-transfer", "h3-photo", "relight", "upscale", "inpaint", "edit", "expand-image", "character", "remove-bg"],
   video: ["upscale-video", "extend-video", "reframe", "mixed-media", "video-remove-bg", "smooth", "sdr-hdr"],
@@ -333,10 +335,7 @@ export function useIn(anchor, item, done) {
     try {
       const ext = extOf(item.full) || (type === "video" ? "mp4" : "png");
       if (!setFile(a, slotOf(a), await fileFromUrl(item.full, `${item.app || "result"}.${ext}`))) return;
-      if (a.id === "h3-regenerate-2k-ic" && item.values?.prompt) {
-        formFor(a).values.prompt = String(item.values.prompt);
-        persist(a);
-      }
+      if (a.id === "h3-regenerate-2k-ic") pendingICPrompt = item.values?.prompt ? String(item.values.prompt) : "";
       if (location.hash !== `#/app/${a.id}`) location.hash = `#/app/${a.id}`;
       else hooks.rerender?.();
       toast(t("toast.sent", { app: a.name }));
@@ -982,7 +981,15 @@ function sidebarPanel(app, rerenderSide) {
   if (app.inputs.some((i) => i.type === "video" || i.type === "audio")) main.push(refBudget(app));
   const advanced = adv.length ? el("details", { class: "adv" }, el("summary", {}, t("ws.advanced"), icon("chevD", "i-chev")), el("div", { class: "in" }, ...adv)) : null;
 
-  const scroll = el("div", { class: "side-scroll" }, card, modeSwitch(app), ...main, advanced);
+  const promptOffer = app.id === "h3-regenerate-2k-ic" && pendingICPrompt && !String(f.values.prompt ?? "").trim()
+    ? el("div", { class: "prompt-offer" },
+      el("b", {}, t("ws.prompt.offer.title")),
+      el("p", {}, t("ws.prompt.offer.warn")),
+      el("div", { class: "row" },
+        el("button", { class: "btn small lime", type: "button", onclick: () => { f.values.prompt = pendingICPrompt; persist(app); pendingICPrompt = ""; rerenderSide(); } }, t("ws.prompt.offer.use")),
+        el("button", { class: "btn small ghost", type: "button", onclick: () => { pendingICPrompt = ""; rerenderSide(); } }, t("ws.prompt.offer.skip"))))
+    : null;
+  const scroll = el("div", { class: "side-scroll" }, card, modeSwitch(app), promptOffer, ...main, advanced);
   const note = el("p", { class: "side-note" }, !app.runnable ? (app.status === "draft" ? t("ws.draft") : t("ws.noworkflow")) : "");
   ui.clearMissing = () => { scroll.querySelectorAll(".missing").forEach((n) => n.classList.remove("missing")); };
   ui.markMissing = (id) => {

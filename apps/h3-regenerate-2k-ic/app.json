@@ -24,7 +24,7 @@
       "type": "textarea",
       "label": "Draft caption (optional)",
       "required": false,
-      "help": "The caption used to generate the 768p draft. Pass it unchanged for identity, lip-sync and text fidelity; it may be empty."
+      "help": "Usually leave this empty. The original prompt often contains reference tags (<Picture N>, <Video N>, <Audio N>) and instructions that the 2K IC pass cannot see; <Video 1> is the draft here. A scene-only caption is safer; reference-specific prompts can harm fidelity."
     },
     {
       "id": "resolution",

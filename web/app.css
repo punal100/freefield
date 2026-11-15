@@ -401,6 +401,10 @@ input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border: 0; bo
 .ref-note.warn { color: var(--warn); }
 .ref-audio { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; width: max-content; margin-top: 2px; color: var(--dim); font-size: 11.5px; }
 .ref-audio.off { opacity: .45; }
+.prompt-offer { display: grid; gap: 9px; padding: 13px; border: 1px solid #3b3520; border-radius: 14px; background: #1b1810; }
+.prompt-offer b { color: var(--accent); font-size: 13px; }
+.prompt-offer p { margin: 0; color: #c9c5b8; font-size: 12.5px; line-height: 1.45; }
+.prompt-offer .row { display: flex; gap: 6px; flex-wrap: wrap; }
 .ref-audio .switch { width: 30px; height: 18px; }
 .ref-audio .switch i::after { top: 3px; left: 3px; width: 12px; height: 12px; }
 .ref-audio .switch input:checked + i::after { transform: translateX(12px); }
