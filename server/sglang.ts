@@ -7,6 +7,7 @@ import type { ComfyEvent } from "@comfyorg/sdk";
 import type { JobLike } from "./history.ts";
 import type { App } from "./registry.ts";
 import type { FileValue, Values } from "./runner.ts";
+import { ExtendSglangJob, extractTail } from "./extend.ts";
 
 type Fetch = typeof fetch;
 
@@ -217,21 +218,13 @@ export class SglangClient {
     return body;
   }
 
-  async submit(app: App, values: Values): Promise<SglangJob> {
+  async submit(app: App, values: Values): Promise<SglangJob | ExtendSglangJob> {
     if (app.backend !== "sglang") throw new Error(`${app.id} is not an SGLang app`);
+    if (app.adapter === "extend") return this.submitExtend(app, values);
     const prompt = String(values.prompt ?? "").trim();
     if (!prompt) throw new SglangInputError("prompt: required");
 
-    const conditions: { type: string; uri: string; role: string }[] = [];
-    const add = async (kind: "image" | "video" | "audio", value: unknown) => {
-      for (const file of files(value)) {
-        const ref = await this.upload(kind, file);
-        conditions.push({ type: kind, uri: ref.uri, role: "reference" });
-      }
-    };
-    await add("image", values.ref_images);
-    await add("video", values.ref_videos);
-    await add("audio", values.ref_audios);
+    const conditions = await this.uploadConditions(values);
     if (!conditions.length) throw new SglangInputError("add at least one image, video, or audio reference");
     if (conditions.every((c) => c.type === "audio")) {
       throw new SglangInputError("audio references need at least one image or video reference");
@@ -255,6 +248,25 @@ export class SglangClient {
         duration_seconds: duration,
       },
     };
+    return this.postVideo(payload);
+  }
+
+  /** Upload image, video and audio references in the order H3 tags them. */
+  private async uploadConditions(values: Values): Promise<{ type: string; uri: string; role: string }[]> {
+    const conditions: { type: string; uri: string; role: string }[] = [];
+    const add = async (kind: "image" | "video" | "audio", value: unknown) => {
+      for (const file of files(value)) {
+        const ref = await this.upload(kind, file);
+        conditions.push({ type: kind, uri: ref.uri, role: "reference" });
+      }
+    };
+    await add("image", values.ref_images);
+    await add("video", values.ref_videos);
+    await add("audio", values.ref_audios);
+    return conditions;
+  }
+
+  private async postVideo(payload: Record<string, unknown>): Promise<SglangJob> {
     await this.warm();
     const res = await this.doFetch(`${this.baseUrl}/v1/videos`, {
       method: "POST",
@@ -265,6 +277,50 @@ export class SglangClient {
     const body = await res.json() as JobData;
     if (!body?.id) throw new SglangInputError("SGLang returned no job id");
     return new SglangJob(this, body.id, body);
+  }
+
+  /**
+   * Extend uses the source tail as Video 1. The request duration includes the
+   * context; the wrapper trims that head and concatenates the source.
+   */
+  private async submitExtend(app: App, values: Values): Promise<ExtendSglangJob> {
+    const prompt = String(values.prompt ?? "").trim();
+    if (!prompt) throw new SglangInputError("prompt: required");
+    const source = files(values.clip)[0];
+    if (!source) throw new SglangInputError("clip: required");
+    const contextFrames = Number(values.context ?? 39);
+    const contextSeconds = Math.max(1, Math.min(120, contextFrames)) / 24;
+    const duration = Number(values.duration ?? 5);
+    const seconds = Number(Math.min(15, Math.max(4, duration + contextSeconds)).toFixed(3));
+    const seed = Number(values.seed);
+    const tail = await extractTail(source, Math.max(1, Math.round(contextFrames)));
+    const conditions: { type: string; uri: string; role: string }[] = [];
+    for (const file of files(values.ref_images)) {
+      const ref = await this.upload("image", file);
+      conditions.push({ type: "image", uri: ref.uri, role: "reference" });
+    }
+    const tailRef = await this.upload("video", tail);
+    conditions.push({ type: "video", uri: tailRef.uri, role: "reference" });
+    for (const file of files(values.ref_videos)) {
+      const ref = await this.upload("video", file);
+      conditions.push({ type: "video", uri: ref.uri, role: "reference" });
+    }
+    for (const file of files(values.ref_audios)) {
+      const ref = await this.upload("audio", file);
+      conditions.push({ type: "audio", uri: ref.uri, role: "reference" });
+    }
+    const payload = {
+      prompt,
+      task: "ref2va",
+      seconds,
+      seed: Number.isFinite(seed) && seed >= 0 ? Math.trunc(seed) : undefined,
+      num_inference_steps: Number(values.steps ?? 50),
+      reference_resize_mode: "match",
+      conditions,
+      target: { short_edge: 768, aspect_ratio: "16:9", duration_seconds: seconds },
+    };
+    const job = await this.postVideo(payload);
+    return new ExtendSglangJob(job, source, contextSeconds);
   }
 
   async unload(): Promise<void> {

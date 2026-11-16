@@ -8,6 +8,7 @@
   "pack": "video-h3-sglang",
   "status": "draft",
   "backend": "sglang",
+  "adapter": "extend",
   "inputs": [
     {
       "id": "clip",
@@ -121,5 +122,5 @@
     "MiniMax H3 (MiniMax H3 Community License)",
     "SGLang"
   ],
-  "notes": "Draft: the adapter will cut the configured tail, add it as Ref2VA Video 1, keep up to 9 images and 2 extra videos, generate a continuation, trim the context head, and concat source + new part. The standalone ComfyUI extension remains available. SGLang V2V is reference conditioning, not an exact latent guide."
+  "notes": "Draft: the adapter cuts the configured tail, adds it as Ref2VA Video 1, keeps up to 9 images and 2 extra videos, generates a continuation, trims the context head, and concatenates source + new part with audio. GPU validation is pending. SGLang V2V is reference conditioning, not an exact latent guide."
 }
