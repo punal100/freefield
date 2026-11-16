@@ -10,6 +10,7 @@ import type { App, Input } from "./registry.ts";
 import { isFileInput, modelKey } from "./registry.ts";
 import type { JobLike } from "./history.ts";
 import { SglangClient, SglangJob } from "./sglang.ts";
+import { OpenH3IcClient, OpenH3IcJob } from "./open_h3_ic.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -436,6 +437,10 @@ export type RunnerOptions = {
   sglangBaseUrl?: string;
   /** Token the SGLang supervisor expects. Default: SGLANG_API_TOKEN, then H3_API_TOKEN. */
   sglangToken?: string;
+  /** Open-H3-Regenerate-2K-IC sidecar, e.g. http://127.0.0.1:30020. */
+  openH3IcBaseUrl?: string;
+  /** Token the IC sidecar expects. Default: OPEN_H3_IC_TOKEN, then H3_API_TOKEN. */
+  openH3IcToken?: string;
   fetch?: typeof fetch;
   sglangFetch?: typeof fetch;
 };
@@ -445,9 +450,11 @@ export class Runner {
   readonly token?: string;
   readonly allowDrafts: boolean;
   readonly sglang?: SglangClient;
+  readonly ic?: OpenH3IcClient;
   private comfy: Comfy;
   private doFetch: typeof fetch;
-  private sglangJobs = new Map<string, SglangJob>();
+  private sglangJobs = new Map<string, JobLike>();
+  private icJobs = new Map<string, JobLike>();
 
   constructor(opts: RunnerOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? process.env.COMFY_BASE_URL ?? "").replace(/\/$/, "");
@@ -463,6 +470,14 @@ export class Runner {
         baseUrl: sglangBaseUrl,
         token: opts.sglangToken ?? process.env.SGLANG_API_TOKEN ?? process.env.H3_API_TOKEN,
         fetch: opts.sglangFetch ?? opts.fetch,
+      });
+    }
+    const icBaseUrl = (opts.openH3IcBaseUrl ?? process.env.OPEN_H3_IC_BASE_URL ?? "").replace(/\/$/, "");
+    if (icBaseUrl) {
+      this.ic = new OpenH3IcClient({
+        baseUrl: icBaseUrl,
+        token: opts.openH3IcToken ?? process.env.OPEN_H3_IC_TOKEN ?? process.env.H3_API_TOKEN,
+        fetch: opts.fetch,
       });
     }
   }
@@ -501,6 +516,14 @@ export class Runner {
       this.sglangJobs.set(job.id, job);
       return job;
     }
+    if (app.backend === "open-h3-ic") {
+      if (!this.ic) throw new InputError(`${app.id} needs OPEN_H3_IC_BASE_URL`);
+      if (this.sglang) await this.sglang.unload();   // one GPU pipeline at a time
+      await this.prepare(app);
+      const job = await this.ic.submit(app, values);
+      this.icJobs.set(job.id, job);
+      return job;
+    }
     if (this.sglang) await this.sglang.unload();   // one GPU pipeline at a time
     await this.prepare(app);
     const wf = await this.comfy.workflows.fromFile(app.workflowPath!);
@@ -519,7 +542,15 @@ export class Runner {
   }
 
   /** Resolve a job id after a restart, using the app's backend when known. */
-  async getJob(id: string, backend?: "comfyui" | "sglang"): Promise<JobLike> {
+  async getJob(id: string, backend?: "comfyui" | "sglang" | "open-h3-ic"): Promise<JobLike> {
+    if (backend === "open-h3-ic") {
+      const known = this.icJobs.get(id);
+      if (known) return known;
+      if (!this.ic) throw new Error("OPEN_H3_IC_BASE_URL is not set");
+      const job = new OpenH3IcJob(this.ic, id);
+      this.icJobs.set(id, job);
+      return job;
+    }
     if (backend === "sglang") {
       const known = this.sglangJobs.get(id);
       if (known) return known;
@@ -529,6 +560,8 @@ export class Runner {
       return job;
     }
     if (backend === "comfyui") return this.comfy.jobs.get(id);
+    const icKnown = this.icJobs.get(id);
+    if (icKnown) return icKnown;
     const known = this.sglangJobs.get(id);
     if (known) return known;
     try {
@@ -547,8 +580,8 @@ export class Runner {
    * can say 1.0 (history.ts, Meter). Reconnects while the signal is alive; a stream that answers anything
    * but 200 (the job is gone) ends quietly: the poll decides.
    */
-  async *frames(jobId: string, signal: AbortSignal, backend?: "comfyui" | "sglang"): AsyncIterable<Frame> {
-    if (backend === "sglang" || this.sglangJobs.has(jobId)) return;
+  async *frames(jobId: string, signal: AbortSignal, backend?: "comfyui" | "sglang" | "open-h3-ic"): AsyncIterable<Frame> {
+    if (backend === "sglang" || backend === "open-h3-ic" || this.sglangJobs.has(jobId) || this.icJobs.has(jobId)) return;
     const url = `${this.baseUrl}/api/v2/jobs/${encodeURIComponent(jobId)}/events`;
     const headers = { accept: "text/event-stream", ...(this.token ? { authorization: `Bearer ${this.token}` } : {}) };
     let failures = 0;

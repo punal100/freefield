@@ -58,6 +58,7 @@ const history = new History(join(outDir, "history"), {
     const app = apps.find((a) => a.id === id);
     if (!app) return undefined;
     if (app.backend === "sglang") return { outputs: app.outputs.map((o) => o.node), nodes: 1, classOf: () => "SGLang" };
+    if (app.backend === "open-h3-ic") return { outputs: app.outputs.map((o) => o.node), nodes: 1, classOf: () => "Open-H3 IC" };
     const graph = app.graph ?? {};
     return { outputs: app.outputs.map((o) => o.node), nodes: Object.keys(graph).length, classOf: (n) => graph[n]?.class_type ?? null };
   },
@@ -88,6 +89,8 @@ function loadExamples(): Record<string, unknown> {
 
 const runnable = (a: App) => a.backend === "sglang"
   ? Boolean(process.env.SGLANG_BASE_URL) && (a.status === "ready" || draftsAllowed)
+  : a.backend === "open-h3-ic"
+  ? Boolean(process.env.OPEN_H3_IC_BASE_URL) && (a.status === "ready" || draftsAllowed)
   : Boolean(a.workflowPath) && (a.status === "ready" || draftsAllowed);
 
 function publicApp(a: App) {
@@ -300,8 +303,8 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST" && area === "apps" && sub === "run") {
         const app = byId.get(id);
         if (!app) return send(res, 404, { error: "unknown app" });
-        if (app.backend !== "sglang" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
-        if (!runnable(app)) throw new InputError(`${app.id} is a draft or its backend is not configured; start the server with FREEFIELD_DRAFTS=1 and set SGLANG_BASE_URL for SGLang apps`);
+        if (app.backend !== "sglang" && app.backend !== "open-h3-ic" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
+        if (!runnable(app)) throw new InputError(`${app.id} is a draft or its backend is not configured; start the server with FREEFIELD_DRAFTS=1 and set SGLANG_BASE_URL or OPEN_H3_IC_BASE_URL for its backend`);
         const refused = guard.refuse(activeRuns());
         if (refused) return send(res, 429, { error: refused });
         const { values, preset } = await readValues(app, await toRequest(req));

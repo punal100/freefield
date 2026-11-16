@@ -7,6 +7,7 @@
   "higgsfield_feature": "Upscale Video",
   "pack": "video-h3-ic",
   "status": "draft",
+  "backend": "open-h3-ic",
   "inputs": [
     {
       "id": "draft",
@@ -80,5 +81,5 @@
     "Open-H3-Regenerate-2K-IC (MiniMax H3 Community License)",
     "MiniMax H3 (MiniMax H3 Community License)"
   ],
-  "notes": "Draft frontend for the separate Open-H3-Regenerate-2K-IC sidecar. The exact latent upscaler and sigma grid are not exposed by SGLang; wire this app to the sidecar when the IC image is baked."
+  "notes": "Draft: the Open-H3-Regenerate-2K-IC sidecar is baked into the IC image but has not been validated on a 1080p/2K GPU run. SGLang does not expose the exact latent upscaler/sigma grid, so this app uses the sidecar, not a resolution option."
 }
