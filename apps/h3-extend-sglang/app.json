@@ -88,12 +88,12 @@
       "id": "context",
       "type": "select",
       "label": "Motion context",
-      "default": 39,
-      "help": "Frames cut from the end of the source and added as Video 1. 39 frames is the community standard.",
+      "default": 63,
+      "help": "Frames cut from the end of the source and added as Video 1. 63 frames keeps the tail above SGLang's 2 s reference-video minimum.",
       "options": [
         { "value": 5, "label": "5 frames (0.2 s)" },
         { "value": 22, "label": "22 frames (0.9 s)" },
-        { "value": 39, "label": "39 frames (1.6 s), recommended" }
+        { "value": 63, "label": "63 frames (2.6 s), recommended" }
       ]
     },
     {
