@@ -1,7 +1,8 @@
 // Long-form projects: create a resumable extension / 2K refinement project,
 // stream the source, then watch segment and IC-window progress from the server.
 // The browser never talks to SGLang or the IC sidecar directly.
-import { api, el, icon, toast } from "./util.js";
+import { api, el, icon, store, toast } from "./util.js";
+import { sideResizer } from "./workspace.js";
 
 const ACTIVE = new Set(["planning", "running", "paused"]);
 const TARGETS = [
@@ -78,7 +79,7 @@ function projectCard(p, actions) {
   const icDone = windows.length > 0 && windows.every((w) => w.status === "succeeded");
   const isRefineOnly = full.kind === "refine";
   const source = full.source?.url
-    ? el("video", { class: "project-source", src: full.source.url, muted: "", playsinline: "", autoplay: "", preload: "metadata", loop: "" })
+    ? el("video", { class: "project-source", src: full.source.url, muted: true, playsinline: "", preload: "metadata" })
     : el("div", { class: "project-source empty-media" }, el("span", {}, icon("film")), el("small", {}, "no source"));
   const final = full.final?.url
     ? el("a", { class: "btn lime small", href: full.final.url, target: "_blank", rel: "noreferrer" }, icon("download"), "Final")
@@ -146,7 +147,7 @@ function projectDetail(p, actions) {
   const events = (p.events || []).slice(-8);
   const segmentList = segments.slice(0, 80).map((s) => el("div", { class: "segment-item" },
     el("div", { class: "segment-thumb" }, s.output?.url
-      ? el("video", { src: s.output.url, muted: "", playsinline: "", preload: "metadata", controls: "" })
+      ? el("video", { src: s.output.url, muted: true, playsinline: "", preload: "metadata", controls: "" })
       : el("span", { class: "dim" }, s.status === "stale" ? "stale" : "pending")),
     el("div", { class: "segment-copy" },
       el("div", { class: "row" }, el("b", {}, `Segment ${s.idx}`), statusTag(s.status),
@@ -362,12 +363,16 @@ export function projectsView() {
     status);
   const sidebar = el("aside", { class: "side proj-side", "aria-label": "New long-form project" },
     el("div", { class: "side-scroll" }, form), sideFoot);
+  sidebar.append(sideResizer(sidebar));
 
   const node = el("div", { class: "ws l-sidebar proj-ws" },
     sidebar,
     el("section", { class: "ws-main proj-main" },
       mainHead,
-      list));  refresh();
+      list));
+  const savedWidth = Number(store.get("side.w", 340));
+  if (Number.isFinite(savedWidth)) node.style.setProperty("--side-w", `${Math.max(280, Math.min(680, savedWidth))}px`);
+  refresh();
   updateEstimate();
   timer = setInterval(() => {
     if (disposed) return;

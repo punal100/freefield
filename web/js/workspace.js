@@ -1235,4 +1235,4 @@ export function workspaceView(appId) {
 
 /** For the viewer's "Recreate" and the feed's "Try again". */
 export function setTab(tab) { wsTab = tab; }
-export { submit as submitApp, hoverPlay, playWhenVisible };
+export { submit as submitApp, hoverPlay, playWhenVisible, sideResizer };
