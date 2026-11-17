@@ -2,6 +2,7 @@
 // their SHA-256 and are shared by projects; SQLite rows hold the metadata.
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { Transform } from "node:stream";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, extname, join, relative, resolve } from "node:path";
@@ -179,22 +180,29 @@ export async function hashFile(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-/** Stream an HTTP request to a temp file without loading it into Node memory. */
+/** Stream an HTTP request to a temp file with bounded buffering and cancellation. */
 export async function receive(req: IncomingMessage, path: string, maxBytes = 2 ** 30): Promise<number> {
   let bytes = 0;
-  const out = createWriteStream(path, { flags: "w" });
+  const ac = new AbortController();
+  const abort = () => ac.abort(new MediaError("upload aborted"));
+  req.once("aborted", abort);
+  req.once("error", abort);
+  const guard = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      bytes += chunk.byteLength;
+      if (bytes > maxBytes) callback(new MediaError(`upload is over ${Math.round(maxBytes / 2 ** 20)} MB`));
+      else callback(null, chunk);
+    },
+  });
   try {
-    for await (const chunk of req) {
-      bytes += (chunk as Buffer).byteLength;
-      if (bytes > maxBytes) throw new MediaError(`upload is over ${Math.round(maxBytes / 2 ** 20)} MB`);
-      if (!out.write(chunk)) await new Promise<void>((resolve) => out.once("drain", resolve));
-    }
-    await new Promise<void>((resolve, reject) => out.end((error?: Error | null) => error ? reject(error) : resolve()));
+    await pipeline(req, guard, createWriteStream(path, { flags: "w" }), { signal: ac.signal });
     return bytes;
   } catch (error) {
-    out.destroy();
     rmSync(path, { force: true });
     throw error;
+  } finally {
+    req.off("aborted", abort);
+    req.off("error", abort);
   }
 }
 
@@ -243,6 +251,7 @@ export async function concatVideos(inputs: string[], output: string, targetSecon
       return;
     } catch { /* corrupt input or incompatible container; re-encode below */ }
   }
+  let tempVideo = "";
   try {
     const allAudio = probes.every((p) => p.hasAudio);
     const args = ["-y", "-v", "error"];
@@ -257,11 +266,13 @@ export async function concatVideos(inputs: string[], output: string, targetSecon
     const pairs = inputs.map((_, i) => allAudio ? `[v${i}][a${i}]` : `[v${i}]`).join("");
     filters.push(`${pairs}concat=n=${inputs.length}:v=1:a=${allAudio ? 1 : 0}${allAudio ? "[v][a]" : "[v]"}`);
     const videoOnly = join(dir, `concat-video-${randomUUID()}.mp4`);
+    tempVideo = videoOnly;
     args.push("-filter_complex", filters.join(";"), "-map", "[v]", ...(allAudio ? ["-map", "[a]", "-c:a", "aac", "-b:a", "160k"] : ["-an"]), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", ...(targetSeconds ? ["-t", targetSeconds.toFixed(6)] : []), "-movflags", "+faststart", allAudio || !audioSource ? output : videoOnly);
     await run(FFMPEG, args, 600_000);
     if (!allAudio && audioSource) await muxSourceAudio(videoOnly, audioSource, output, targetSeconds ? Math.round(targetSeconds * 24) : 0);
   } finally {
     rmSync(list, { force: true });
+    if (tempVideo) rmSync(tempVideo, { force: true });
   }
 }
 

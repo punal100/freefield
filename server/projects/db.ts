@@ -84,7 +84,7 @@ export type NewAsset = Omit<AssetRow, "created_at">;
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
-PRAGMA synchronous = NORMAL;
+PRAGMA synchronous = NORMAL;\nPRAGMA busy_timeout = 5000;
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -197,7 +197,7 @@ export class ProjectDB {
     mkdirSync(this.mediaDir, { recursive: true });
     mkdirSync(this.stateDir, { recursive: true });
     this.dbPath = join(this.stateDir, "freefield.sqlite");
-    this.db = new DatabaseSync(this.dbPath);
+    this.db = new DatabaseSync(this.dbPath, { timeout: 5000 });
     this.db.exec(SCHEMA);
     const row = this.db.prepare("SELECT version FROM schema_version LIMIT 1").get() as { version?: number } | undefined;
     if (!row) this.db.prepare("INSERT INTO schema_version(version) VALUES (1)").run();

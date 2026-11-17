@@ -387,6 +387,9 @@ const server = createServer(async (req, res) => {
 // runs that were still going when the server stopped are followed again
 history.resume(async (jobId, appId) => getRunner().getJob(jobId, apps.find((a) => a.id === appId)?.backend));
 
+server.headersTimeout = 30_000;
+server.requestTimeout = 6 * 60 * 60 * 1000;
+
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.FREEFIELD_HOST || "127.0.0.1";
 server.listen(port, host, () => {
