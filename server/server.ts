@@ -27,6 +27,8 @@ import { explainSubmitError, InputError, resolveValues, Runner, type Values } fr
 import { History } from "./history.ts";
 import { Flags } from "./flags.ts";
 import { DOOR_HTML, Guard } from "./guard.ts";
+import { ProjectService } from "./projects/service.ts";
+import { handleProjects } from "./projects/routes.ts";
 
 const root = repoRoot();
 const { apps, problems } = loadRegistry(root);
@@ -43,6 +45,10 @@ let runner: Runner | null = null;
 const getRunner = () => (runner ??= new Runner());
 const draftsAllowed = process.env.FREEFIELD_DRAFTS === "1";
 const outDir = process.env.FREEFIELD_OUT || join(root, "out");
+let projects: ProjectService | null = null;
+const getProjects = () => (projects ??= new ProjectService({
+  root: process.env.FREEFIELD_PROJECTS_DIR || join(outDir, "projects"),
+}));
 const guard = Guard.fromEnv(join(outDir, "limits.json"));
 const maxUploadMb = Number(process.env.FREEFIELD_MAX_UPLOAD_MB || (guard.hosted ? 100 : 0));
 
@@ -282,6 +288,7 @@ const server = createServer(async (req, res) => {
       }
     }
     if (parts[0] === "api") {
+      if (await handleProjects(getProjects(), req, res, parts, url)) return;
       const [, area, id, sub, arg] = parts;
       if (req.method === "GET" && area === "apps" && parts.length === 2) {
         const order = { image: 0, video: 1, audio: 2, utility: 3 } as Record<string, number>;
@@ -382,5 +389,8 @@ history.resume(async (jobId, appId) => getRunner().getJob(jobId, apps.find((a) =
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.FREEFIELD_HOST || "127.0.0.1";
-server.listen(port, host, () => console.log(`freefield on http://${host}:${port} (${apps.length} apps)`
-  + (guard.passcode ? " · passcode required" : "") + (guard.maxRunsPerDay ? ` · ${guard.maxRunsPerDay} runs a day` : "")));
+server.listen(port, host, () => {
+  console.log(`freefield on http://${host}:${port} (${apps.length} apps)`
+    + (guard.passcode ? " · passcode required" : "") + (guard.maxRunsPerDay ? ` · ${guard.maxRunsPerDay} runs a day` : ""));
+  getProjects().resume();
+});

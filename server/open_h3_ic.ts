@@ -191,6 +191,25 @@ export class OpenH3IcClient {
     return new OpenH3IcJob(this, body.id, body);
   }
 
+  /** One sidecar process over a JSONL job list; the model is loaded once. */
+  async submitBatch(jobsPath: string, opts: { resolution?: string; sampler?: string; sharp?: number; vae?: string; seed?: number } = {}): Promise<OpenH3IcJob> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/regenerate/batch`, {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({
+        jobs: jobsPath,
+        resolution: opts.resolution ?? "2k",
+        sampler: opts.sampler ?? "up3",
+        sharp: opts.sharp ?? 1,
+        vae: opts.vae ?? "fast",
+        seed: opts.seed ?? 0,
+      }),
+    });
+    if (!res.ok) throw new OpenH3IcInputError(await this.failure(res));
+    const body = await res.json() as JobData;
+    if (!body?.id) throw new OpenH3IcInputError("Open-H3 IC returned no batch job id");
+    return new OpenH3IcJob(this, body.id, body);
+  }
   async job(id: string, signal?: AbortSignal): Promise<JobData> {
     const res = await this.doFetch(`${this.baseUrl}/v1/regenerate/${encodeURIComponent(id)}`, {
       headers: this.headers(),

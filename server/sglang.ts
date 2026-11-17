@@ -190,6 +190,10 @@ export class SglangClient {
     return `SGLang answered ${res.status}`;
   }
 
+  /** Submit an already-built H3 payload. Used by the long-form project worker. */
+  async submitPayload(payload: Record<string, unknown>): Promise<SglangJob> {
+    return this.postVideo(payload);
+  }
   async warm(): Promise<void> {
     try {
       await this.doFetch(`${this.baseUrl}/v1/model/load`, {

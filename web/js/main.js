@@ -12,6 +12,7 @@ import { hooks, feed } from "./feed.js";
 import { openViewer } from "./viewer.js";
 import { openCompare } from "./compare.js";
 import { flags } from "./flags.js";
+import { projectsView } from "./projects.js";
 
 const main = el("main", { id: "main", class: "view" });
 let bar = null;
@@ -31,6 +32,7 @@ function route() {
     location.replace(`#/app/${lastAppFor(studio[1])}`);
     return null;
   }
+  if (hash.startsWith("#/projects")) return projectsView();
   if (hash.startsWith("#/apps")) return appsView();
   if (hash.startsWith("#/library")) return libraryView();
   if (hash.startsWith("#/vram")) return vramView(gpuState.data?.device ? gpuState.data : null);
