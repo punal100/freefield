@@ -192,7 +192,7 @@ export class OpenH3IcClient {
   }
 
   /** One sidecar process over a JSONL job list; the model is loaded once. */
-  async submitBatch(jobsPath: string, opts: { resolution?: string; sampler?: string; sharp?: number; vae?: string; seed?: number } = {}): Promise<OpenH3IcJob> {
+  async submitBatch(jobsPath: string, opts: { resolution?: string; sampler?: string; sharp?: number; vae?: string; seed?: number; timeout?: number } = {}): Promise<OpenH3IcJob> {
     const res = await this.doFetch(`${this.baseUrl}/v1/regenerate/batch`, {
       method: "POST",
       headers: this.headers(true),
@@ -203,6 +203,7 @@ export class OpenH3IcClient {
         sharp: opts.sharp ?? 1,
         vae: opts.vae ?? "fast",
         seed: opts.seed ?? 0,
+        timeout: opts.timeout,
       }),
     });
     if (!res.ok) throw new OpenH3IcInputError(await this.failure(res));

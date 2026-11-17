@@ -68,10 +68,16 @@ export async function handleProjects(
       if (req.method === "GET") { send(res, 200, { projects: service.list() }); return true; }
       if (req.method === "POST") {
         const body = await jsonBody(req);
+        const segmentPrompts = Array.isArray(body.segmentPrompts)
+          ? body.segmentPrompts.map((value) => String(value ?? ""))
+          : undefined;
         const project = service.create({
           kind: String(body.kind ?? "both") as "extend" | "refine" | "both",
           targetSeconds: Number(body.targetSeconds ?? 120),
           prompt: typeof body.prompt === "string" ? body.prompt : "",
+          story: typeof body.story === "string" ? body.story : "",
+          segmentPrompts,
+          seedBase: body.seedBase === undefined ? undefined : Number(body.seedBase),
           visibleSeconds: body.visibleSeconds === undefined ? undefined : Number(body.visibleSeconds),
           contextFrames: body.contextFrames === undefined ? undefined : Number(body.contextFrames),
           steps: body.steps === undefined ? undefined : Number(body.steps),
@@ -111,6 +117,15 @@ export async function handleProjects(
     }
     if (req.method === "POST" && sub === "start") { send(res, 202, service.start(id)); return true; }
     if (req.method === "POST" && sub === "cancel") { send(res, 200, service.cancel(id)); return true; }
+    if (req.method === "POST" && sub === "pause") { send(res, 200, service.pause(id)); return true; }
+    if (req.method === "POST" && sub === "resume") { send(res, 200, service.resume(id)); return true; }
+    if (req.method === "POST" && sub === "refine") {
+      const body = await jsonBody(req);
+      const targetResolution = body.targetResolution === "1080p" ? "1080p" : "2k";
+      const sampler = body.sampler === "up4" || body.sampler === "hf8" ? body.sampler : "up3";
+      send(res, 202, service.refine(id, { targetResolution, sampler }));
+      return true;
+    }
     if (req.method === "POST" && sub === "retry") {
       const body = await jsonBody(req);
       const index = Number(body.index);

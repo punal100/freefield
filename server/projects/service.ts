@@ -6,7 +6,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { ProjectDB, type ProjectKind, type ProjectRow, type SegmentRow, type WindowRow } from "./db.ts";
-import { AssetStore, assembleIcWindows, concatVideos, extractTail, extractWindow, MediaError, probeMedia, receive, tempPath, trimHead } from "./assets.ts";
+import { AssetStore, assembleIcWindows, concatVideos, extractTail, extractWindow, MediaError, probeMedia, receive, scanQuality, tempPath, trimHead } from "./assets.ts";
 import { configFingerprint, planExtension, planIcWindows, type ExtensionPlanSegment, type IcWindow } from "./planner.ts";
 import { SglangClient } from "./../sglang.ts";
 import { OpenH3IcClient } from "./../open_h3_ic.ts";
@@ -18,16 +18,23 @@ export type ProjectConfig = {
   targetResolution: "1080p" | "2k";
   sampler: "up3" | "up4" | "hf8";
   aspect: string;
+  story?: string;
+  segmentPrompts?: string[];
+  seedBase?: number;
   sourceName?: string;
   references: { kind: "image" | "video" | "audio"; asset: string; name?: string }[];
   masterAsset?: string;
   finalAsset?: string;
+  qc?: { checkedAt: string; black: number; freeze: number; silence: number; warnings: string[] };
 };
 
 export type CreateProjectInput = {
   kind: ProjectKind;
   targetSeconds: number;
   prompt?: string;
+  story?: string;
+  segmentPrompts?: string[];
+  seedBase?: number;
   visibleSeconds?: number;
   contextFrames?: number;
   steps?: number;
@@ -106,6 +113,11 @@ export class ProjectService {
   create(input: CreateProjectInput): ProjectRow {
     if (!["extend", "refine", "both"].includes(input.kind)) throw new MediaError("kind must be extend, refine or both");
     if (!Number.isFinite(input.targetSeconds) || input.targetSeconds <= 0) throw new MediaError("targetSeconds must be positive");
+    const prompt = String(input.prompt ?? "").trim().slice(0, 7000);
+    const story = String(input.story ?? "").trim().slice(0, 7000);
+    const segmentPrompts = (input.segmentPrompts ?? []).map((value) => String(value).trim().slice(0, 7000));
+    if (!prompt && !story && !segmentPrompts.some(Boolean)) throw new MediaError("add a prompt or continuity story");
+    const seedBase = Number.isFinite(input.seedBase) ? Math.max(0, Math.min(2 ** 31 - 1, Math.trunc(Number(input.seedBase)))) : 42;
     const config: ProjectConfig = {
       visibleSeconds: Math.max(2, Math.min(12, input.visibleSeconds ?? 10)),
       contextFrames: input.contextFrames ?? 63,
@@ -113,14 +125,17 @@ export class ProjectService {
       targetResolution: input.targetResolution ?? "2k",
       sampler: input.sampler ?? "up3",
       aspect: "16:9",
+      story,
+      segmentPrompts,
+      seedBase,
       references: [],
     };
     if (config.contextFrames < 48) throw new MediaError("contextFrames must be at least 48 (2 seconds)");
     if (config.visibleSeconds * 24 + config.contextFrames > 360) throw new MediaError("visible seconds plus context must fit H3's 15 second maximum");
     const id = projectId();
     mkdirSync(this.projectDir(id), { recursive: true });
-    const project = this.db.createProject({ id, kind: input.kind, targetSeconds: input.targetSeconds, prompt: input.prompt, config });
-    this.db.event(id, "created", { kind: input.kind, targetSeconds: input.targetSeconds });
+    const project = this.db.createProject({ id, kind: input.kind, targetSeconds: input.targetSeconds, prompt, config });
+    this.db.event(id, "created", { kind: input.kind, targetSeconds: input.targetSeconds, segments: segmentPrompts.filter(Boolean).length });
     this.exportProject(id);
     return project;
   }
@@ -129,14 +144,20 @@ export class ProjectService {
     return this.db.projects().map((p) => this.view(p, false));
   }
 
-  /** A server restart leaves in-memory workers behind; resume ledger-running projects. */
-  resume(): void {
-    for (const project of this.db.projects(1000)) {
-      if (project.status !== "running" && project.status !== "planning") continue;
-      if (this.active.has(project.id)) continue;
-      this.active.set(project.id, { cancelled: false });
-      void this.run(project.id).catch((error) => this.fail(project.id, error));
+  /** Resume one paused project, or (without an id) ledger-running projects after restart. */
+  resume(id?: string): unknown {
+    if (!id) {
+      for (const project of this.db.projects(1000)) {
+        if (project.status !== "running" && project.status !== "planning") continue;
+        if (this.active.has(project.id)) continue;
+        this.active.set(project.id, { cancelled: false });
+        void this.run(project.id).catch((error) => this.fail(project.id, error));
+      }
+      return undefined;
     }
+    const project = this.require(id);
+    if (project.status !== "paused") throw new MediaError("project is not paused");
+    return this.start(id);
   }
 
   get(id: string): unknown | null {
@@ -166,6 +187,10 @@ export class ProjectService {
     const temp = tempPath(this.projectDir(id));
     await receive(req, temp, 200 * 2 ** 20);
     const asset = await this.assets.ingest(temp, name || `${kind}.bin`);
+    const assetRow = this.db.asset(asset);
+    if (kind !== "image" && (!assetRow?.duration || assetRow.duration < 1.99 || assetRow.duration > 15.01)) {
+      throw new MediaError(`${kind} references must be 2–15 seconds (got ${(assetRow?.duration ?? 0).toFixed(2)} s)`);
+    }
     const config = this.config(project);
     const sameKind = config.references.filter((r) => r.kind === kind).length;
     const limit = kind === "image" ? 9 : kind === "video" ? 2 : 3;
@@ -188,12 +213,18 @@ export class ProjectService {
     const config = this.config(project);
     const sourceFrames = source.frames ?? Math.round((source.duration ?? 0) * 24);
     if (!sourceFrames) throw new MediaError("could not determine the source frame count");
+    if ((source.duration ?? 0) < 1.99) throw new MediaError("the source clip must be at least 2 seconds");
     const targetFrames = Math.round(project.target_seconds * 24);
+    if (project.kind === "refine") this.assertIcSource(source);
 
     if (project.kind !== "refine") {
       const plan = planExtension({ sourceFrames, targetFrames, visibleFrames: config.visibleSeconds * 24, contextFrames: config.contextFrames });
       this.db.transaction(() => {
-        for (const s of plan.segments) if (!this.db.segment(id, s.index)) this.db.insertSegment(extensionSegmentRow(id, s, project.prompt || "", 42 + s.index, config.steps));
+        for (const s of plan.segments) {
+          if (!this.db.segment(id, s.index)) {
+            this.db.insertSegment(extensionSegmentRow(id, s, this.segmentPrompt(project, config, s.index), (config.seedBase ?? 42) + s.index, config.steps));
+          }
+        }
       });
       if (!plan.segments.length) throw new MediaError("target duration must be longer than the source for extension");
     }
@@ -215,6 +246,20 @@ export class ProjectService {
     return this.get(id);
   }
 
+  pause(id: string): unknown {
+    const project = this.require(id);
+    if (project.status !== "running" && project.status !== "planning") throw new MediaError("only a running project can be paused");
+    const state = this.active.get(id);
+    if (state) {
+      state.cancelled = true;
+      state.job?.cancel().catch(() => {});
+    }
+    this.db.updateProject(id, { status: "paused", error: null });
+    this.db.event(id, "paused", {});
+    this.exportProject(id);
+    return this.get(id);
+  }
+
   cancel(id: string): unknown {
     const project = this.require(id);
     const state = this.active.get(id);
@@ -232,12 +277,16 @@ export class ProjectService {
     const project = this.require(id);
     const segment = this.db.segment(id, idx);
     if (!segment) throw new MediaError(`segment ${idx} does not exist`);
-    // A retry invalidates this segment and every later dependent segment.
+    // A retry invalidates this segment and every later dependent segment, and
+    // any IC windows derived from the old master.
     this.db.transaction(() => {
       for (const s of this.db.segments(id)) {
         if (s.idx >= idx) {
           this.db.updateSegment(id, s.idx, { status: "stale", output_asset: null, error: null, finished_at: null });
         }
+      }
+      for (const window of this.db.windows(id)) {
+        this.db.updateWindow(id, window.idx, { status: "stale", input_asset: null, output_asset: null, error: null, finished_at: null });
       }
     });
     this.db.updateProject(id, { status: "planning", error: null });
@@ -246,27 +295,84 @@ export class ProjectService {
     return this.get(id);
   }
 
+  /** Re-run only the 2K IC pass from the retained 768p master. */
+  refine(id: string, opts: { targetResolution?: "1080p" | "2k"; sampler?: "up3" | "up4" | "hf8" } = {}): unknown {
+    const project = this.require(id);
+    if (this.active.has(id)) throw new MediaError("project is already running");
+    const config = this.config(project);
+    const master = config.masterAsset ?? (project.kind === "refine" ? project.source_asset : null);
+    if (!master) throw new MediaError("finish the extension stage before re-running 2K IC");
+    const asset = this.db.asset(master);
+    if (!asset) throw new MediaError("IC master asset is missing");
+    this.assertIcSource(asset);
+    config.targetResolution = opts.targetResolution ?? config.targetResolution ?? "2k";
+    config.sampler = opts.sampler ?? config.sampler ?? "up3";
+    const windows = planIcWindows({ totalFrames: asset.frames!, windowFrames: 124, overlapFrames: 17 });
+    if (!windows.length) throw new MediaError("source is shorter than one 124-frame IC window");
+    this.db.transaction(() => {
+      this.db.clearWindows(id);
+      for (const window of windows) this.db.insertWindow(icWindowRow(id, window));
+    });
+    this.updateConfig(id, config);
+    this.db.updateProject(id, { status: "planning", error: null });
+    this.db.event(id, "refine", { targetResolution: config.targetResolution, sampler: config.sampler, windows: windows.length });
+    this.exportProject(id);
+    this.active.set(id, { cancelled: false });
+    void this.runIcOnly(id, config, master).catch((error) => this.fail(id, error));
+    return this.get(id);
+  }
+
+  private async runIcOnly(id: string, config: ProjectConfig, master: string): Promise<void> {
+    try {
+      const project = this.require(id);
+      this.db.updateProject(id, { status: "running", error: null });
+      const finalAsset = await this.runIc(id, project, config, master);
+      config.masterAsset = master;
+      config.finalAsset = finalAsset;
+      await this.qualityCheck(id, config, finalAsset);
+      this.updateConfig(id, config);
+      this.db.updateProject(id, { status: "succeeded", error: null });
+      this.db.event(id, "succeeded", { finalAsset, qc: config.qc ?? null });
+      this.exportProject(id);
+    } finally {
+      this.active.delete(id);
+    }
+  }
+
   private async run(id: string): Promise<void> {
     const project = this.require(id);
     const config = this.config(project);
     try {
       let masterAsset = project.source_asset!;
+      let finalAsset = masterAsset;
       if (project.kind !== "refine") {
         masterAsset = await this.runExtension(id, project, config);
         config.masterAsset = masterAsset;
         this.updateConfig(id, config);
       }
       if (project.kind !== "extend") {
-        masterAsset = await this.runIc(id, project, config, masterAsset);
+        this.assertIcSource(this.db.asset(masterAsset));
+        finalAsset = await this.runIc(id, project, config, masterAsset);
       }
       config.masterAsset = masterAsset;
-      config.finalAsset = masterAsset;
+      config.finalAsset = finalAsset;
+      await this.qualityCheck(id, config, finalAsset);
       this.updateConfig(id, config);
       this.db.updateProject(id, { status: "succeeded", error: null });
-      this.db.event(id, "succeeded", { finalAsset: masterAsset });
-    this.exportProject(id);
+      this.db.event(id, "succeeded", { finalAsset, qc: config.qc ?? null });
+      this.exportProject(id);
     } finally {
       this.active.delete(id);
+    }
+  }
+
+  private async qualityCheck(id: string, config: ProjectConfig, assetId: string): Promise<void> {
+    if (process.env.FREEFIELD_QC === "0") return;
+    try {
+      config.qc = await scanQuality(this.assets.absolute(assetId));
+      this.db.event(id, "qc", config.qc);
+    } catch (error) {
+      this.db.event(id, "qc", { error: (error as Error).message });
     }
   }
 
@@ -285,8 +391,16 @@ export class ProjectService {
     await concatVideos(inputs, stage, project.target_seconds, this.assets.absolute(source));
     const asset = await this.assets.ingest(stage, "master.mp4");
     const assetRow = this.db.asset(asset)!;
-    if ((assetRow.frames ?? 0) < Math.floor(project.target_seconds * 24) - 2) {
-      throw new MediaError(`extension master has ${assetRow.frames ?? 0} frames, expected about ${Math.round(project.target_seconds * 24)}`);
+    const expectedFrames = Math.round(project.target_seconds * 24);
+    if ((assetRow.frames ?? 0) < expectedFrames - 2) {
+      throw new MediaError(`extension master has ${assetRow.frames ?? 0} frames, expected about ${expectedFrames}`);
+    }
+    if (assetRow.fps && Math.abs(assetRow.fps - 24) > 0.1) {
+      throw new MediaError(`extension master is ${assetRow.fps.toFixed(2)} fps; expected 24 fps`);
+    }
+    const sourceRow = this.db.asset(source);
+    if (sourceRow?.has_audio && !assetRow.has_audio) {
+      throw new MediaError("extension master lost the source audio track");
     }
     return asset;
   }
@@ -353,6 +467,13 @@ export class ProjectService {
       await writeFile(generated, await this.sglang.content(job.id));
       const visible = join(this.projectDir(id), "staging", `visible-${segment.idx}-${randomBytes(3).toString("hex")}.mp4`);
       await trimHead(generated, visible, contextFrames / 24);
+      const visibleProbe = await probeMedia(visible);
+      if ((visibleProbe.frames ?? 0) < segment.visible_frames - 2) {
+        throw new MediaError(`segment ${segment.idx} has ${visibleProbe.frames ?? 0} visible frames, expected ${segment.visible_frames}`);
+      }
+      if (visibleProbe.fps && Math.abs(visibleProbe.fps - 24) > 0.1) {
+        throw new MediaError(`segment ${segment.idx} is ${visibleProbe.fps.toFixed(2)} fps; expected 24 fps`);
+      }
       const asset = await this.assets.ingest(visible, `segment-${segment.idx}.mp4`);
       this.db.updateSegment(id, segment.idx, {
         status: "succeeded", output_asset: asset, finished_at: new Date().toISOString(), error: null,
@@ -388,6 +509,10 @@ export class ProjectService {
       const input = join(windowDir, `${String(window.idx).padStart(6, "0")}.mp4`);
       if (!window.input_asset || !this.db.asset(window.input_asset)) {
         await extractWindow(sourcePath, input, window.start_frame);
+        const inputProbe = await probeMedia(input);
+        if ((inputProbe.frames ?? 0) < 124 || inputProbe.width !== 1344 || inputProbe.height !== 768) {
+          throw new MediaError(`IC window ${window.idx} is ${inputProbe.width}×${inputProbe.height}/${inputProbe.frames ?? 0}f; expected 1344×768/124f`);
+        }
         const asset = await this.assets.ingest(input, `window-${window.idx}.mp4`);
         this.db.updateWindow(id, window.idx, { input_asset: asset });
       }
@@ -402,24 +527,29 @@ export class ProjectService {
         jobRows.push({
           input: this.assets.absolute(window.input_asset!),
           output: join(refinedDir, `${String(window.idx).padStart(6, "0")}.mp4`),
-          caption: project.prompt || "",
+          caption: this.segmentPrompt(project, config, window.idx + 1),
         });
       }
       const jobsPath = join(this.projectDir(id), "ic", "jobs.jsonl");
       writeFileSync(jobsPath, jobRows.map((row) => JSON.stringify(row)).join("\n") + "\n");
       this.db.event(id, "ic", { status: "running", windows: jobRows.length, totalFrames });
-      const job = await this.ic.submitBatch(jobsPath, { resolution: config.targetResolution, sampler: config.sampler, seed: 42 });
+      const batchTimeout = Math.max(7200, Math.min(604800, jobRows.length * 180));
+      const job = await this.ic.submitBatch(jobsPath, { resolution: config.targetResolution, sampler: config.sampler, seed: config.seedBase ?? 42, timeout: batchTimeout });
       this.active.get(id)!.job = job;
-      await job.wait(24 * 3600 * 1000);
+      await job.wait((batchTimeout + 600) * 1000);
       if (this.active.get(id)?.cancelled) throw new Error("canceled");
       if (job.status !== "succeeded") throw new MediaError(job.error?.message || `IC batch ${job.status}`);
     }
+    const expected = config.targetResolution === "1080p" ? [1920, 1080] : [2560, 1440];
     for (const window of this.db.windows(id)) {
       if (window.status === "succeeded" && window.output_asset && this.db.asset(window.output_asset)) continue;
       const output = join(refinedDir, `${String(window.idx).padStart(6, "0")}.mp4`);
       try {
         const probe = await probeMedia(output);
         if ((probe.frames ?? 0) < 113) throw new MediaError(`IC window ${window.idx} has only ${probe.frames ?? 0} frames`);
+        if (probe.width !== expected[0] || probe.height !== expected[1]) {
+          throw new MediaError(`IC window ${window.idx} is ${probe.width}×${probe.height}; expected ${expected[0]}×${expected[1]}`);
+        }
         const asset = await this.assets.ingest(output, `refined-${window.idx}.mp4`);
         this.db.updateWindow(id, window.idx, { status: "succeeded", output_asset: asset, finished_at: new Date().toISOString(), error: null });
       } catch (error) {
@@ -431,6 +561,10 @@ export class ProjectService {
     const output = join(this.projectDir(id), "final", "final-2k.mp4");
     mkdirSync(join(this.projectDir(id), "final"), { recursive: true });
     await assembleIcWindows(paths, sourcePath, output, totalFrames, this.db.windows(id).map((w) => w.start_frame));
+    const finalProbe = await probeMedia(output);
+    if ((finalProbe.frames ?? 0) < totalFrames - 2) throw new MediaError(`final IC output has ${finalProbe.frames ?? 0} frames; expected ${totalFrames}`);
+    if (finalProbe.width !== expected[0] || finalProbe.height !== expected[1]) throw new MediaError(`final IC output is ${finalProbe.width}×${finalProbe.height}; expected ${expected[0]}×${expected[1]}`);
+    if (!finalProbe.hasAudio) throw new MediaError("final IC output lost the original audio");
     const final = await this.assets.ingest(output, "final-2k.mp4");
     this.db.event(id, "ic", { status: "succeeded", finalAsset: final });
     return final;
@@ -439,7 +573,7 @@ export class ProjectService {
   private fail(id: string, error: unknown): void {
     const message = (error as Error)?.message || String(error);
     const current = this.db.project(id);
-    if (current?.status === "canceled") {
+    if (current?.status === "canceled" || current?.status === "paused") {
       this.active.delete(id);
       return;
     }
@@ -459,6 +593,24 @@ export class ProjectService {
     try { return JSON.parse(project.config_json || "{}") as ProjectConfig; } catch { return {
       visibleSeconds: 10, contextFrames: 63, steps: 8, targetResolution: "2k", sampler: "up3", aspect: "16:9", references: [],
     }; }
+  }
+
+  private segmentPrompt(project: ProjectRow, config: ProjectConfig, index: number): string {
+    return [config.story, project.prompt, config.segmentPrompts?.[index - 1]]
+      .map((part) => String(part ?? "").trim())
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 7000);
+  }
+
+  private assertIcSource(source: ReturnType<ProjectDB["asset"]>): void {
+    if (!source) throw new MediaError("IC source asset is missing");
+    if (!source.frames || source.frames < 124) throw new MediaError("2K IC needs a source with at least 124 frames");
+    if (source.fps && Math.abs(source.fps - 24) > 0.1) throw new MediaError(`2K IC needs a 24 fps source (got ${source.fps.toFixed(2)} fps)`);
+    if (!source.has_audio) throw new MediaError("2K IC needs source audio to preserve; the draft has no audio track");
+    if (!source.width || !source.height) throw new MediaError("could not read the IC source dimensions");
+    if (source.width % 32 || source.height % 32) throw new MediaError("2K IC dimensions must be divisible by 32");
+    if (source.width * source.height > 1344 * 768) throw new MediaError("2K IC source must fit within 1344×768 (area limit)");
   }
 
   private updateConfig(id: string, config: ProjectConfig): void {

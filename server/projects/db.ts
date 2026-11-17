@@ -321,6 +321,10 @@ export class ProjectDB {
     this.db.prepare(`UPDATE ic_windows SET ${fields.join(", ")} WHERE project_id = ? AND idx = ?`).run(...(values as never[]));
   }
 
+  clearWindows(projectId: string): void {
+    this.db.prepare("DELETE FROM ic_windows WHERE project_id = ?").run(projectId);
+  }
+
   event(projectId: string, kind: string, payload: unknown): void {
     this.db.prepare("INSERT INTO events(project_id, kind, payload_json, created_at) VALUES (?, ?, ?, ?)")
       .run(projectId, kind, JSON.stringify(payload), new Date().toISOString());

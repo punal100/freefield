@@ -18,6 +18,14 @@ const IC_STEP_FRAMES = 107;
 
 export class MediaError extends Error {}
 
+export type QualityReport = {
+  checkedAt: string;
+  black: number;
+  freeze: number;
+  silence: number;
+  warnings: string[];
+};
+
 export type Probe = {
   bytes: number;
   width: number | null;
@@ -82,6 +90,35 @@ export async function probeMedia(path: string): Promise<Probe> {
     audioCodec: audio?.codec_name ?? null,
     json: data,
   };
+}
+
+/** Cheap deterministic continuity signals; identity drift still needs human review. */
+export async function scanQuality(path: string): Promise<QualityReport> {
+  const base = ["-hide_banner", "-nostats", "-i", path, "-vf", "blackdetect=d=0.5:pix_th=0.08,freezedetect=n=0.003:d=1"];
+  const withAudio = [...base, "-af", "silencedetect=n=-45dB:d=1", "-f", "null", "-"];
+  let stderr = "";
+  let audioScanned = true;
+  try {
+    const result = await execFileAsync(FFMPEG, withAudio, { encoding: "utf8", timeout: 20 * 60_000, maxBuffer: 16 * 2 ** 20 });
+    stderr = String(result.stderr ?? "");
+  } catch (error) {
+    const e = error as { stderr?: string };
+    stderr = String(e.stderr ?? "");
+    if (/matches no streams|does not contain any stream|Invalid argument/i.test(stderr)) {
+      audioScanned = false;
+      const result = await execFileAsync(FFMPEG, [...base, "-an", "-f", "null", "-"], { encoding: "utf8", timeout: 20 * 60_000, maxBuffer: 16 * 2 ** 20 });
+      stderr = String(result.stderr ?? "");
+    }
+  }
+  const count = (re: RegExp) => (stderr.match(re) || []).length;
+  const black = count(/black_start:/g);
+  const freeze = count(/freeze_start:/g);
+  const silence = audioScanned ? count(/silence_start:/g) : 0;
+  const warnings: string[] = [];
+  if (black) warnings.push(`${black} black segment${black === 1 ? "" : "s"}`);
+  if (freeze) warnings.push(`${freeze} frozen segment${freeze === 1 ? "" : "s"}`);
+  if (silence) warnings.push(`${silence} silent segment${silence === 1 ? "" : "s"}`);
+  return { checkedAt: new Date().toISOString(), black, freeze, silence, warnings };
 }
 
 export class AssetStore {
@@ -197,6 +234,7 @@ export async function concatVideos(inputs: string[], output: string, targetSecon
   const first = probes[0];
   const copySafe = Boolean(first) && probes.every((p) => p.videoCodec === first.videoCodec
     && p.width === first.width && p.height === first.height
+    && Math.abs((p.fps ?? 24) - (first.fps ?? 24)) < 0.01
     && p.hasAudio === first.hasAudio
     && (!first.hasAudio || (p.audioCodec === first.audioCodec && p.audioRate === first.audioRate)));
   if (copySafe) {
@@ -232,15 +270,37 @@ export async function extractWindow(input: string, output: string, startFrame: n
   const start = startFrame / 24;
   await run(FFMPEG, [
     "-y", "-v", "error", "-ss", start.toFixed(6), "-i", input,
-    "-frames:v", "124", "-vf", "fps=24,setpts=PTS-STARTPTS",
+    "-frames:v", "124", "-vf", "fps=24,scale=1344:768:force_original_aspect_ratio=increase,crop=1344:768,setpts=PTS-STARTPTS",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", output,
   ], 300_000);
 }
 
+/** One xfade chain. Chunks keep FFmpeg's argv and filter graph below Windows limits. */
+async function assembleChain(inputs: string[], starts: number[], output: string): Promise<void> {
+  if (inputs.length === 1) { await copyTo(inputs[0], output); return; }
+  const args = ["-y", "-v", "error"];
+  for (const input of inputs) args.push("-i", input);
+  const filters: string[] = [];
+  for (let i = 0; i < inputs.length; i++) filters.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
+  const base = starts[0] ?? 0;
+  let current = "v0";
+  for (let i = 1; i < inputs.length; i++) {
+    const out = `x${i}`;
+    const start = starts[i] ?? base + i * IC_STEP_FRAMES;
+    const overlap = Math.max(1, start - (starts[i - 1] ?? base));
+    const duration = Math.min(IC_OVERLAP_FRAMES, overlap, 124);
+    filters.push(`[${current}][v${i}]xfade=transition=fade:duration=${(duration / 24).toFixed(6)}:offset=${((start - base) / 24).toFixed(6)}[${out}]`);
+    current = out;
+  }
+  args.push("-filter_complex", filters.join(";"), "-map", `[${current}]`, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output);
+  await run(FFMPEG, args, 1200_000);
+}
+
 /**
- * Crossfade 2K IC windows. Every window must be 124 frames. The timeline is
- * trimmed to `targetFrames` and the original source audio is muxed once.
+ * Crossfade 2K IC windows. Every window is 124 frames. Large projects are
+ * assembled in chunks so the argv/filter graph stays under OS limits; the
+ * original source audio is muxed once into the final file.
  */
 export async function assembleIcWindows(windows: string[], sourceWithAudio: string, output: string, targetFrames: number, starts?: number[]): Promise<void> {
   if (!windows.length) throw new MediaError("IC produced no windows");
@@ -248,26 +308,30 @@ export async function assembleIcWindows(windows: string[], sourceWithAudio: stri
     await muxSourceAudio(windows[0], sourceWithAudio, output, targetFrames);
     return;
   }
-  const args = ["-y", "-v", "error"];
-  for (const w of windows) args.push("-i", w);
-  const filters: string[] = [];
-  for (let i = 0; i < windows.length; i++) filters.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
-  let current = "v0";
-  for (let i = 1; i < windows.length; i++) {
-    const out = `x${i}`;
-    const start = starts?.[i] ?? i * IC_STEP_FRAMES;
-    const overlap = starts ? Math.max(1, start - (starts[i - 1] ?? 0)) : IC_OVERLAP_FRAMES;
-    const duration = Math.min(IC_OVERLAP_FRAMES, overlap, 124);
-    filters.push(`[${current}][v${i}]xfade=transition=fade:duration=${(duration / 24).toFixed(6)}:offset=${(start / 24).toFixed(6)}[${out}]`);
-    current = out;
-  }
-  const intermediate = join(dirname(output), `ic-assembled-${randomUUID()}.mp4`);
-  args.push("-filter_complex", filters.join(";"), "-map", `[${current}]`, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", intermediate);
+  const positions = starts ?? windows.map((_, index) => index * IC_STEP_FRAMES);
+  const chunkSize = Math.max(8, Math.min(128, Number(process.env.FREEFIELD_IC_ASSEMBLY_CHUNK || 48)));
+  const pending: string[] = [];
   try {
-    await run(FFMPEG, args, 1200_000);
-    await muxSourceAudio(intermediate, sourceWithAudio, output, targetFrames);
+    const groups: { path: string; start: number }[] = [];
+    for (let offset = 0; offset < windows.length; offset += chunkSize) {
+      const end = Math.min(windows.length, offset + chunkSize);
+      const chunkPaths = windows.slice(offset, end);
+      const chunkStarts = positions.slice(offset, end);
+      const path = join(dirname(output), `ic-chunk-${randomUUID()}.mp4`);
+      await assembleChain(chunkPaths, chunkStarts, path);
+      pending.push(path);
+      groups.push({ path, start: chunkStarts[0] });
+    }
+    if (groups.length === 1) {
+      await muxSourceAudio(groups[0].path, sourceWithAudio, output, targetFrames);
+      return;
+    }
+    const combined = join(dirname(output), `ic-combined-${randomUUID()}.mp4`);
+    pending.push(combined);
+    await assembleChain(groups.map((group) => group.path), groups.map((group) => group.start), combined);
+    await muxSourceAudio(combined, sourceWithAudio, output, targetFrames);
   } finally {
-    rmSync(intermediate, { force: true });
+    for (const path of pending) rmSync(path, { force: true });
   }
 }
 
