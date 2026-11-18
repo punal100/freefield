@@ -443,7 +443,7 @@ export class ProjectService {
     const payload = {
       prompt: segment.prompt || project.prompt || "",
       task: "ref2va",
-      seconds: segment.request_json ? Number(JSON.parse(segment.request_json).requestSeconds) : (segment.visible_frames + contextFrames) / 24,
+      seconds: Math.ceil(segment.request_json ? Number(JSON.parse(segment.request_json).requestSeconds) : (segment.visible_frames + contextFrames) / 24),
       seed: segment.seed ?? 42,
       num_inference_steps: segment.steps ?? config.steps,
       reference_resize_mode: "match",
@@ -451,7 +451,7 @@ export class ProjectService {
       target: {
         short_edge: 768,
         aspect_ratio: config.aspect || "16:9",
-        duration_seconds: (segment.visible_frames + contextFrames) / 24,
+        duration_seconds: Math.ceil((segment.visible_frames + contextFrames) / 24),
       },
     };
     this.db.updateSegment(id, segment.idx, { status: "running", started_at: new Date().toISOString(), attempts: segment.attempts + 1, error: null });

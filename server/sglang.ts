@@ -295,7 +295,7 @@ export class SglangClient {
     const contextFrames = Number(values.context ?? 39);
     const contextSeconds = Math.max(1, Math.min(120, contextFrames)) / 24;
     const duration = Number(values.duration ?? 5);
-    const seconds = Number(Math.min(15, Math.max(4, duration + contextSeconds)).toFixed(3));
+    const seconds = Math.ceil(Math.min(15, Math.max(4, duration + contextSeconds)));
     const seed = Number(values.seed);
     const tail = await extractTail(source, Math.max(1, Math.round(contextFrames)));
     const conditions: { type: string; uri: string; role: string }[] = [];
