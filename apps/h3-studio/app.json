@@ -1,0 +1,23 @@
+{
+  "$schema": "../../schema/app.schema.json",
+  "id": "h3-studio",
+  "name": "H3 Studio",
+  "section": "video",
+  "summary": "Build a finished film from H3 extensions in automatic mode, or control every extension and 2K IC range in manual mode.",
+  "higgsfield_feature": "Long-form video",
+  "pack": "video-h3-sglang",
+  "status": "ready",
+  "backend": "projects",
+  "inputs": [],
+  "outputs": [
+    { "node": "projects", "type": "video", "label": "Project final" }
+  ],
+  "models": [],
+  "credits": [
+    "MiniMax H3 (MiniMax H3 Community License)",
+    "SGLang",
+    "Open-H3-Regenerate-2K-IC"
+  ],
+  "notes": "Project workspace: source and references, automatic or manual extension, range IC enhancement, assembly and final output."
+}
+

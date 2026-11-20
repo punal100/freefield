@@ -22,6 +22,10 @@ function route() {
   const hash = location.hash || "#/";
   const m = /^#\/app\/([\w-]+)/.exec(hash);
   if (m) {
+    if (m[1] === "h3-studio") {
+      const app = byId.get(m[1]);
+      return { ...projectsView(), app, active: "apps" };
+    }
     const view = workspaceView(m[1]);
     const app = view.app;
     const featured = app && FEATURED.some((f) => f.id === app.id);
@@ -32,8 +36,7 @@ function route() {
     location.replace(`#/app/${lastAppFor(studio[1])}`);
     return null;
   }
-  if (hash.startsWith("#/manual")) { location.replace("#/projects"); return null; }
-  if (hash.startsWith("#/projects")) return projectsView();
+  if (hash.startsWith("#/manual") || hash.startsWith("#/projects")) { location.replace("#/app/h3-studio"); return null; }
   if (hash.startsWith("#/apps")) return appsView();
   if (hash.startsWith("#/library")) return libraryView();
   if (hash.startsWith("#/vram")) return vramView(gpuState.data?.device ? gpuState.data : null);
@@ -108,3 +111,5 @@ window.addEventListener("unhandledrejection", (e) => {
 });
 boot();
 export { byId, t };
+
+

@@ -542,7 +542,7 @@ export class Runner {
   }
 
   /** Resolve a job id after a restart, using the app's backend when known. */
-  async getJob(id: string, backend?: "comfyui" | "sglang" | "open-h3-ic"): Promise<JobLike> {
+  async getJob(id: string, backend?: "comfyui" | "sglang" | "open-h3-ic" | "projects"): Promise<JobLike> {
     if (backend === "open-h3-ic") {
       const known = this.icJobs.get(id);
       if (known) return known;
@@ -580,8 +580,8 @@ export class Runner {
    * can say 1.0 (history.ts, Meter). Reconnects while the signal is alive; a stream that answers anything
    * but 200 (the job is gone) ends quietly: the poll decides.
    */
-  async *frames(jobId: string, signal: AbortSignal, backend?: "comfyui" | "sglang" | "open-h3-ic"): AsyncIterable<Frame> {
-    if (backend === "sglang" || backend === "open-h3-ic" || this.sglangJobs.has(jobId) || this.icJobs.has(jobId)) return;
+  async *frames(jobId: string, signal: AbortSignal, backend?: "comfyui" | "sglang" | "open-h3-ic" | "projects"): AsyncIterable<Frame> {
+    if (backend === "sglang" || backend === "open-h3-ic" || backend === "projects" || this.sglangJobs.has(jobId) || this.icJobs.has(jobId)) return;
     const url = `${this.baseUrl}/api/v2/jobs/${encodeURIComponent(jobId)}/events`;
     const headers = { accept: "text/event-stream", ...(this.token ? { authorization: `Bearer ${this.token}` } : {}) };
     let failures = 0;
@@ -641,3 +641,4 @@ function safeJson(text: string): Record<string, unknown> {
     return { text };
   }
 }
+

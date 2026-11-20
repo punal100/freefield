@@ -93,7 +93,7 @@ function loadExamples(): Record<string, unknown> {
   }
 }
 
-const runnable = (a: App) => a.backend === "sglang"
+const runnable = (a: App) => a.backend === "projects" ? true : a.backend === "sglang"
   ? Boolean(process.env.SGLANG_BASE_URL) && (a.status === "ready" || draftsAllowed)
   : a.backend === "open-h3-ic"
   ? Boolean(process.env.OPEN_H3_IC_BASE_URL) && (a.status === "ready" || draftsAllowed)
@@ -229,7 +229,15 @@ let gpuCache: { at: number; body: unknown } | null = null;
 async function gpuStatus(withDevice = false) {
   const configured = Boolean(process.env.COMFY_BASE_URL);
   const host = configured ? (guard.hosted ? "Modal" : new URL(process.env.COMFY_BASE_URL!).host) : null;
-  const warm = Date.now() - lastContact < WARM_MS;
+  const projectWorking = (() => {
+    try {
+      const projects = getProjects().list() as { status?: string; working?: boolean }[];
+      return projects.some((project) => project.working || ["planning", "running", "paused"].includes(String(project.status)));
+    } catch {
+      return false;
+    }
+  })();
+  const warm = projectWorking || Date.now() - lastContact < WARM_MS;
   const running = activeRuns();
   const base = { configured, host, warm, last_contact: lastContact ? new Date(lastContact).toISOString() : null,
     waking: waking ? { seconds: Math.round((Date.now() - waking.since) / 1000), error: waking.error ?? null } : null,
@@ -269,6 +277,69 @@ function wake() {
     .catch((e) => { if (waking === started) waking = { ...started, error: (e as Error).message }; });
 }
 
+async function workView(): Promise<unknown> {
+  const historyEntries = history.list(undefined, 100).map((entry) => history.view(entry)) as Record<string, any>[];
+  const projects = getProjects().list() as Record<string, any>[];
+  let jobs: Record<string, any>[] = [];
+  try {
+    jobs = (await getRunner().sglang?.listJobs() ?? []) as unknown as Record<string, any>[];
+  } catch { /* manager may be down; project/history still useful */ }
+  const jobsById = new Map(jobs.map((job) => [String(job.id), job]));
+  const queueOrder = new Map<string, number>();
+  jobs.filter((job) => String(job.status) === "queued")
+    .forEach((job, index) => queueOrder.set(String(job.id), Number(job.queue_position ?? index + 1)));
+  const items: Record<string, any>[] = [];
+  for (const entry of historyEntries) {
+    const job = entry.job ? jobsById.get(String(entry.job)) : null;
+    const progress = job?.progress != null ? Number(job.progress) / 100 : Number(entry.progress?.value ?? 0);
+    const rawStatus = String(job?.status ?? entry.status ?? "queued");
+    items.push({
+      id: entry.id, owner_id: entry.id, app_id: entry.app, app_name: entry.app,
+      kind: "app_run", parent_id: null, job_id: entry.job, upstream_id: entry.job,
+      status: rawStatus === "in_progress" ? "running" : rawStatus === "completed" ? "succeeded" : rawStatus,
+      stage: entry.progress?.node ?? (rawStatus === "queued" ? "Queued" : null),
+      queue_position: job?.queue_position ?? (queueOrder.get(String(entry.job)) ?? null),
+      progress, completed: null, total: null,
+      elapsed_seconds: entry.started ? Math.max(0, Math.round((Date.now() - new Date(entry.started).getTime()) / 1000)) : null,
+      eta_seconds: null, started_at: entry.started ?? entry.created, finished_at: entry.finished ?? null,
+      error: entry.error?.message ?? job?.error ?? null, preview_url: entry.preview ?? null,
+      final_url: entry.outputs?.[0]?.url ?? null, created_at: entry.created,
+    });
+  }
+  for (const project of projects) {
+    const runtime = project.runtime ?? {};
+    const job = runtime.job_id ? jobsById.get(String(runtime.job_id)) : null;
+    const status = String(job?.status === "in_progress" ? "running" : job?.status === "completed" ? "succeeded" : (project.status ?? "draft"));
+    items.push({
+      id: project.id, owner_id: project.id, app_id: "h3-studio", app_name: "H3 Studio",
+      kind: "project", parent_id: null, job_id: runtime.job_id ?? null, upstream_id: runtime.upstream_id ?? runtime.job_id ?? null,
+      status, stage: runtime.stage ?? null, queue_position: job?.queue_position ?? runtime.queue_position ?? null,
+      progress: Number(runtime.progress ?? project.progress ?? 0), completed: project.completed ?? null, total: project.total ?? null,
+      elapsed_seconds: runtime.elapsed_seconds ?? null, eta_seconds: runtime.eta_seconds ?? null,
+      started_at: runtime.started_at ?? project.created_at, finished_at: project.finished_at ?? null,
+      error: project.error ?? null, preview_url: project.source?.url ?? project.master?.url ?? null,
+      final_url: project.final?.url ?? null, created_at: project.created_at,
+      active_kind: runtime.active_kind ?? null, active_index: runtime.active_index ?? null, active_total: runtime.active_total ?? null,
+    });
+  }
+  const known = new Set(items.map((item) => item.job_id).filter(Boolean));
+  for (const job of jobs) {
+    if (known.has(String(job.id))) continue;
+    items.push({
+      id: String(job.id), owner_id: "", app_id: "h3-manager", app_name: "H3 Manager",
+      kind: "foreign_job", parent_id: null, job_id: String(job.id), upstream_id: String(job.id),
+      status: job.status === "in_progress" ? "running" : job.status === "completed" ? "succeeded" : job.status,
+      stage: null, queue_position: queueOrder.get(String(job.id)) ?? null,
+      progress: Number(job.progress ?? 0) / 100, completed: null, total: null, elapsed_seconds: null,
+      eta_seconds: null, started_at: null, finished_at: null, error: job.error ?? null,
+      preview_url: null, final_url: null, created_at: new Date(Number(job.created_at ?? 0) * 1000).toISOString(),
+    });
+  }
+  const rank = (status: string) => status === "running" ? 0 : status === "queued" ? 1 : status === "failed" ? 2 : 3;
+  items.sort((a, b) => rank(a.status) - rank(b.status) || String(b.created_at).localeCompare(String(a.created_at)));
+  return { items };
+}
+
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", "http://local");
@@ -288,6 +359,9 @@ const server = createServer(async (req, res) => {
       }
     }
     if (parts[0] === "api") {
+      if (req.method === "GET" && parts[1] === "work" && parts.length === 2) {
+        return send(res, 200, await workView());
+      }
       if (await handleProjects(getProjects(), req, res, parts, url)) return;
       const [, area, id, sub, arg] = parts;
       if (req.method === "GET" && area === "apps" && parts.length === 2) {
@@ -310,7 +384,7 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST" && area === "apps" && sub === "run") {
         const app = byId.get(id);
         if (!app) return send(res, 404, { error: "unknown app" });
-        if (app.backend !== "sglang" && app.backend !== "open-h3-ic" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
+        if (app.backend !== "sglang" && app.backend !== "open-h3-ic" && app.backend !== "projects" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
         if (!runnable(app)) throw new InputError(`${app.id} is a draft or its backend is not configured; start the server with FREEFIELD_DRAFTS=1 and set SGLANG_BASE_URL or OPEN_H3_IC_BASE_URL for its backend`);
         const refused = guard.refuse(activeRuns());
         if (refused) return send(res, 429, { error: refused });
@@ -397,3 +471,4 @@ server.listen(port, host, () => {
     + (guard.passcode ? " · passcode required" : "") + (guard.maxRunsPerDay ? ` · ${guard.maxRunsPerDay} runs a day` : ""));
   getProjects().resume();
 });
+

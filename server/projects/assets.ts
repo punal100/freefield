@@ -232,7 +232,7 @@ export async function trimHead(input: string, output: string, seconds: number): 
 }
 
 /** Concatenate source + visible segments; stream-copy when possible, re-encode once otherwise. */
-export async function concatVideos(inputs: string[], output: string, targetSeconds?: number, audioSource?: string): Promise<void> {
+export async function concatVideos(inputs: string[], output: string, targetSeconds?: number, audioSource?: string, targetSize?: { width: number; height: number }): Promise<void> {
   const dir = dirname(output);
   const list = join(dir, `concat-${randomUUID()}.txt`);
   const escape = (p: string) => p.replaceAll("'", "'\\''");
@@ -240,7 +240,7 @@ export async function concatVideos(inputs: string[], output: string, targetSecon
   writeFileSync(list, inputs.map((p) => `file '${escape(resolve(p))}'`).join("\n") + "\n");
   const probes = await Promise.all(inputs.map((input) => probeMedia(input)));
   const first = probes[0];
-  const copySafe = Boolean(first) && probes.every((p) => p.videoCodec === first.videoCodec
+  const copySafe = !targetSize && Boolean(first) && probes.every((p) => p.videoCodec === first.videoCodec
     && p.width === first.width && p.height === first.height
     && Math.abs((p.fps ?? 24) - (first.fps ?? 24)) < 0.01
     && p.hasAudio === first.hasAudio
@@ -256,7 +256,7 @@ export async function concatVideos(inputs: string[], output: string, targetSecon
     const allAudio = probes.every((p) => p.hasAudio);
     const args = ["-y", "-v", "error"];
     for (const input of inputs) args.push("-i", input);
-    const size = first?.width && first.height ? first : null;
+    const size = targetSize ?? (first?.width && first.height ? first : null);
     const fit = size ? `scale=${size.width}:${size.height}:force_original_aspect_ratio=decrease,pad=${size.width}:${size.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,` : "";
     const filters: string[] = [];
     for (let i = 0; i < inputs.length; i++) {
@@ -297,6 +297,34 @@ export async function extractRange(input: string, output: string, startFrame: nu
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", output,
   ], 600_000);
+}
+
+/** Put a regenerated range back into its source clip, keeping the outside frames. */
+export async function spliceRange(source: string, enhanced: string, output: string, startFrame: number, endFrame: number, sourceFrames: number): Promise<void> {
+  const dir = dirname(output);
+  mkdirSync(dir, { recursive: true });
+  const parts: string[] = [];
+  const temp: string[] = [];
+  try {
+    if (startFrame > 0) {
+      const path = join(dir, `splice-head-${randomUUID()}.mp4`);
+      temp.push(path);
+      await extractRange(source, path, 0, startFrame);
+      parts.push(path);
+    }
+    parts.push(enhanced);
+    if (endFrame < sourceFrames) {
+      const path = join(dir, `splice-tail-${randomUUID()}.mp4`);
+      temp.push(path);
+      await extractRange(source, path, endFrame, sourceFrames);
+      parts.push(path);
+    }
+    const info = await probeMedia(enhanced);
+    if (!info.width || !info.height) throw new MediaError("could not read enhanced range dimensions");
+    await concatVideos(parts, output, sourceFrames / 24, source, { width: info.width, height: info.height });
+  } finally {
+    for (const path of temp) rmSync(path, { force: true });
+  }
 }
 
 /** One xfade chain. Chunks keep FFmpeg's argv and filter graph below Windows limits. */
@@ -373,3 +401,4 @@ export async function copyTo(input: string, output: string): Promise<void> {
   mkdirSync(dirname(output), { recursive: true });
   copyFileSync(input, output);
 }
+

@@ -2,6 +2,7 @@
 // one native H3 request, and expose the supervisor's async job as a Comfy-like
 // JobLike so the existing history, progress, cancel, and output paths keep
 // working.
+import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import type { ComfyEvent } from "@comfyorg/sdk";
 import type { JobLike } from "./history.ts";
@@ -23,6 +24,12 @@ type JobData = {
   created_at?: number | null;
   started_at?: number | null;
   completed_at?: number | null;
+  stage?: string | null;
+  step?: number | null;
+  steps?: number | null;
+  step_seconds?: number | null;
+  eta_seconds?: number | null;
+  elapsed_seconds?: number | null;
 };
 
 type Reference = { uri: string; kind: string; name?: string };
@@ -62,6 +69,22 @@ function messageOf(data: JobData): string | null {
   return null;
 }
 
+function denoiseTelemetry(): { step: number; steps: number; stepSeconds: number; etaSeconds: number } | null {
+  try {
+    const text = readFileSync(process.env.H3_SGLANG_LOG || "/workspace/logs/sglang.log", "utf8").slice(-200_000);
+    const matches = [...text.matchAll(/minimax_h3 denoise:\s*(\d+)%\|[^\n]*?\|\s*(\d+)\/(\d+)\s+\[[^<]*<([^,]+),\s*([\d.]+)s\/it/g)];
+    const last = matches.at(-1);
+    if (!last) return null;
+    const step = Number(last[2]);
+    const steps = Number(last[3]);
+    const stepSeconds = Number(last[5]);
+    if (!Number.isFinite(step) || !Number.isFinite(steps) || !Number.isFinite(stepSeconds) || steps <= 0) return null;
+    return { step, steps, stepSeconds, etaSeconds: Math.max(0, (steps - step) * stepSeconds) };
+  } catch {
+    return null;
+  }
+}
+
 /** One manager job. The supervisor returns JSON; progress and status are polled. */
 export class SglangJob implements JobLike {
   readonly id: string;
@@ -71,6 +94,17 @@ export class SglangJob implements JobLike {
   completedAt: Date | null = null;
   progress: { value: number; step: number | null; steps: number | null; currentNodeClass: string | null } | null = null;
   queuePosition: number | null = null;
+  stage: string | null = null;
+  step: number | null = null;
+  steps: number | null = null;
+  stepSeconds: number | null = null;
+  etaSeconds: number | null = null;
+
+  get elapsedSeconds(): number | null {
+    if (!this.startedAt) return null;
+    const end = this.completedAt ?? new Date();
+    return Math.max(0, Math.round((end.getTime() - this.startedAt.getTime()) / 1000));
+  }
 
   private readonly client: SglangClient;
 
@@ -95,6 +129,25 @@ export class SglangJob implements JobLike {
       };
     }
     if (typeof data.queue_position === "number") this.queuePosition = data.queue_position;
+    if (typeof data.stage === "string") this.stage = data.stage;
+    if (typeof data.step === "number") this.step = data.step;
+    if (typeof data.steps === "number") this.steps = data.steps;
+    if (typeof data.step_seconds === "number") this.stepSeconds = data.step_seconds;
+    if (typeof data.eta_seconds === "number") this.etaSeconds = data.eta_seconds;
+    if (next === "running" && (!this.step || !this.steps || !this.stepSeconds)) {
+      const telemetry = denoiseTelemetry();
+      if (telemetry) {
+        this.step = telemetry.step;
+        this.steps = telemetry.steps;
+        this.stepSeconds = telemetry.stepSeconds;
+        this.etaSeconds = telemetry.etaSeconds;
+        this.stage = "Denoising";
+      }
+    }
+    if (this.progress) {
+      this.progress.step = this.step;
+      this.progress.steps = this.steps;
+    }
     if (TERMINAL.has(next)) {
       this.completedAt ??= new Date();
       this.queuePosition = null;
@@ -377,6 +430,19 @@ export class SglangClient {
     return await res.json() as { state: string; error?: string | null };
   }
 
+  async listJobs(): Promise<JobData[]> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/videos`, { headers: this.headers() });
+    if (!res.ok) throw new SglangInputError(await this.failure(res));
+    const body = await res.json() as { data?: JobData[] };
+    return Array.isArray(body.data) ? body.data : [];
+  }
+
+  async cancelQueued(): Promise<void> {
+    for (const job of await this.listJobs()) {
+      if (String(job.status) === "queued" && job.id) await this.cancel(job.id).catch(() => {});
+    }
+  }
+
   async job(id: string, signal?: AbortSignal): Promise<JobData> {
     const res = await this.doFetch(`${this.baseUrl}/v1/videos/${encodeURIComponent(id)}`, {
       headers: this.headers(),
@@ -403,3 +469,4 @@ export class SglangClient {
     if (!res.ok && res.status !== 404) throw new Error(await this.failure(res));
   }
 }
+

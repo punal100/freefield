@@ -6,7 +6,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { ProjectDB, type ProjectKind, type ProjectRow, type SegmentRow, type WindowRow } from "./db.ts";
-import { AssetStore, assembleIcWindows, concatVideos, extractRange, extractTail, extractWindow, MediaError, probeMedia, receive, scanQuality, tempPath, trimHead } from "./assets.ts";
+import { AssetStore, assembleIcWindows, concatVideos, extractRange, extractTail, extractWindow, MediaError, probeMedia, receive, scanQuality, spliceRange, tempPath, trimHead } from "./assets.ts";
 import { configFingerprint, planExtension, planIcWindows, type ExtensionPlanSegment, type IcWindow } from "./planner.ts";
 import { SglangClient } from "./../sglang.ts";
 import { OpenH3IcClient } from "./../open_h3_ic.ts";
@@ -99,6 +99,34 @@ export class ProjectService {
       baseUrl: ib,
       token: opts.icToken ?? process.env.OPEN_H3_IC_TOKEN ?? process.env.H3_API_TOKEN,
     }) : undefined);
+    this.reconcileOrphans();
+  }
+
+  private settleWork(id: string, status: "failed" | "stale", error: string | null): void {
+    for (const segment of this.db.segments(id)) {
+      if (segment.status === "running" || segment.status === "queued") {
+        this.db.updateSegment(id, segment.idx, { status, error, finished_at: new Date().toISOString() });
+      }
+    }
+    for (const window of this.db.windows(id)) {
+      if (window.status === "running" || window.status === "queued") {
+        this.db.updateWindow(id, window.idx, { status, error, finished_at: new Date().toISOString() });
+      }
+    }
+  }
+
+  private reconcileOrphans(): void {
+    for (const project of this.db.projects()) {
+      if (project.status === "running" || project.status === "planning") continue;
+      const hasWork = this.db.segments(project.id).some((s) => s.status !== "succeeded")
+        || this.db.windows(project.id).some((w) => w.status !== "succeeded");
+      if (project.status === "draft" && this.config(project).manual && hasWork && !this.config(project).finalAsset) {
+        this.db.updateProject(project.id, { status: "failed", error: "manual session interrupted; no active job" });
+        this.settleWork(project.id, "failed", "manual session interrupted; no active job");
+      } else if (project.status === "failed") this.settleWork(project.id, "failed", project.error ?? "project failed");
+      else if (project.status === "canceled") this.settleWork(project.id, "stale", "canceled by user");
+      else this.settleWork(project.id, "stale", null);
+    }
   }
 
   projectDir(id: string): string { return join(this.root, id); }
@@ -212,6 +240,9 @@ export class ProjectService {
     if (!project.source_asset) throw new MediaError("upload a source video first");
     if (project.status === "running") throw new MediaError("project is already running");
     if (project.status === "succeeded") throw new MediaError("project already succeeded; create a new project to change settings");
+    const busy = this.db.projects().find((other) => other.id !== id
+      && (other.status === "running" || other.status === "planning"));
+    if (busy) throw new MediaError("another project is already running; cancel it before starting this one");
     const source = this.db.asset(project.source_asset);
     if (!source) throw new MediaError("source asset is missing");
     const config = this.config(project);
@@ -252,6 +283,7 @@ export class ProjectService {
 
   async manualExtend(id: string, input: Record<string, unknown>): Promise<unknown> {
     const project = this.require(id);
+    if (this.active.has(id)) throw new MediaError("project is already running");
     const config = this.config(project);
     const sourceAsset = String(input.sourceAsset ?? project.source_asset ?? "");
     const source = this.db.asset(sourceAsset);
@@ -284,8 +316,10 @@ export class ProjectService {
       await this.runSegment(id, project, config, segment, sourceAsset);
       if (this.db.project(id)?.status === "running") this.db.updateProject(id, { status: "draft", error: null });
     } catch (error) {
-      if (this.db.project(id)?.status !== "canceled") {
+      const current = this.db.project(id)?.status;
+      if (current !== "canceled") {
         this.db.updateProject(id, { status: "failed", error: (error as Error).message });
+        this.settleWork(id, "failed", (error as Error).message);
       }
       throw error;
     } finally {
@@ -296,6 +330,7 @@ export class ProjectService {
 
   async manualEnhance(id: string, input: Record<string, unknown>): Promise<unknown> {
     const project = this.require(id);
+    if (this.active.has(id)) throw new MediaError("project is already running");
     if (!this.ic) throw new MediaError("OPEN_H3_IC_BASE_URL is not configured");
     const config = this.config(project);
     const sourceAsset = String(input.sourceAsset ?? project.source_asset ?? "");
@@ -325,13 +360,20 @@ export class ProjectService {
     this.db.updateProject(id, { status: "running", error: null });
     this.active.set(id, { cancelled: false });
     try {
-      const finalAsset = await this.runIc(id, project, config, clipAsset);
+      let finalAsset = await this.runIc(id, project, config, clipAsset);
+      if (startFrame > 0 || endFrame < sourceFrames) {
+        const output = join(this.projectDir(id), "final", "manual-enhanced.mp4");
+        await spliceRange(this.assets.absolute(sourceAsset), this.assets.absolute(finalAsset), output, startFrame, endFrame, sourceFrames);
+        finalAsset = await this.assets.ingest(output, "manual-enhanced.mp4");
+      }
       config.finalAsset = finalAsset;
       this.updateConfig(id, config);
       if (this.db.project(id)?.status === "running") this.db.updateProject(id, { status: "draft", error: null });
     } catch (error) {
-      if (this.db.project(id)?.status !== "canceled") {
+      const current = this.db.project(id)?.status;
+      if (current !== "canceled") {
         this.db.updateProject(id, { status: "failed", error: (error as Error).message });
+        this.settleWork(id, "failed", (error as Error).message);
       }
       throw error;
     } finally {
@@ -364,6 +406,7 @@ export class ProjectService {
       state.job?.cancel().catch(() => {});
     }
     this.db.updateProject(id, { status: "paused", error: null });
+    this.settleWork(id, "stale", null);
     this.db.event(id, "paused", {});
     this.exportProject(id);
     return this.get(id);
@@ -377,6 +420,7 @@ export class ProjectService {
       state.job?.cancel().catch(() => {});
     }
     this.db.updateProject(id, { status: "canceled", error: "canceled by user" });
+    this.settleWork(id, "stale", "canceled by user");
     this.db.event(id, "canceled", {});
     this.exportProject(id);
     return this.get(id);
@@ -563,13 +607,55 @@ export class ProjectService {
         duration_seconds: Math.ceil((segment.visible_frames + contextFrames) / 24),
       },
     };
-    this.db.updateSegment(id, segment.idx, { status: "running", started_at: new Date().toISOString(), attempts: segment.attempts + 1, error: null });
+    if (segment.job_id) {
+      await this.sglang.cancel(segment.job_id).catch(() => {});
+      await this.sglang.unload(true).catch(() => {});
+    }
+    await this.sglang.cancelQueued().catch(() => {});
+    this.db.updateSegment(id, segment.idx, {
+      status: "running", started_at: new Date().toISOString(), attempts: segment.attempts + 1, error: null,
+      progress: 0, stage: "Submitting", job_status: "queued", last_heartbeat_at: new Date().toISOString(),
+    });
     this.db.event(id, "segment", { index: segment.idx, status: "running" });
     const job = await this.sglang.submitPayload(payload);
     this.active.get(id)!.job = job;
     this.db.updateSegment(id, segment.idx, { job_id: job.id, upstream_id: job.id });
     try {
-      await job.wait(6 * 3600 * 1000);
+      const started = Date.now();
+      const stallMs = Math.max(5, Number(process.env.FREEFIELD_JOB_STALL_MINUTES || 15)) * 60 * 1000;
+      let lastProgress = -1;
+      let lastStep: number | null = null;
+      let lastChange = Date.now();
+      for (;;) {
+        await job.refresh();
+        if (this.active.get(id)?.cancelled) throw new Error("canceled");
+        const now = Date.now();
+        const progress = job.progress?.value ?? (job.status === "succeeded" ? 1 : 0);
+        const stage = job.stage ?? (job.status === "queued" ? "Queued" : job.status === "running" ? "Running" : null);
+        this.db.updateSegment(id, segment.idx, {
+          progress,
+          stage,
+          queue_position: job.queuePosition,
+          job_status: job.status,
+          last_heartbeat_at: new Date().toISOString(),
+        });
+        this.db.updateProject(id, { last_heartbeat_at: new Date().toISOString() });
+        if (progress !== lastProgress || job.step !== lastStep) {
+          lastProgress = progress;
+          lastStep = job.step;
+          lastChange = now;
+        }
+        if (["succeeded", "failed", "canceled", "expired", "lost"].includes(job.status)) break;
+        if (job.status === "running" && now - lastChange > stallMs) {
+          await job.cancel();
+          throw new MediaError(`generation stalled at ${Math.round(progress * 100)}%`);
+        }
+        if (now - started > 6 * 3600 * 1000) {
+          await job.cancel();
+          throw new MediaError("generation exceeded the six-hour limit");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
       if (this.active.get(id)?.cancelled) throw new Error("canceled");
       if (job.status !== "succeeded") throw new MediaError(job.error?.message || `SGLang job ${job.status}`);
       const generated = join(this.projectDir(id), "staging", `generated-${segment.idx}-${randomBytes(3).toString("hex")}.mp4`);
@@ -592,10 +678,14 @@ export class ProjectService {
       rmSync(tailPath, { force: true });
       return asset;
     } catch (error) {
+      const interrupted = Boolean(this.active.get(id)?.cancelled || this.db.project(id)?.status === "canceled");
       this.db.updateSegment(id, segment.idx, {
-        status: "failed", error: (error as Error).message, finished_at: new Date().toISOString(),
+        status: interrupted ? "stale" : "failed",
+        error: (error as Error).message,
+        job_status: interrupted ? "canceled" : "failed",
+        finished_at: new Date().toISOString(),
       });
-      this.db.event(id, "segment", { index: segment.idx, status: "failed", error: (error as Error).message });
+      this.db.event(id, "segment", { index: segment.idx, status: interrupted ? "interrupted" : "failed", error: (error as Error).message });
       rmSync(tailPath, { force: true });
       throw error;
     }
@@ -691,6 +781,7 @@ export class ProjectService {
       return;
     }
     this.db.updateProject(id, { status: "failed", error: message });
+    this.settleWork(id, "failed", message);
     this.db.event(id, "failed", { error: message });
     this.exportProject(id);
     this.active.delete(id);
@@ -757,16 +848,50 @@ export class ProjectService {
     const completed = segmentRows.filter((s) => s.status === "succeeded").length
       + windowRows.filter((w) => w.status === "succeeded").length;
     const total = segmentsTotal + windowsTotal;
+    const activeSegment = segmentRows.find((s) => s.status === "running") ?? null;
+    const activeWindow = windowRows.find((w) => w.status === "running") ?? null;
+    const active = activeSegment ?? activeWindow;
+    const activeKind = activeSegment ? "segment" : activeWindow ? "window" : null;
+    const working = Boolean(active);
+    const runtimeProgress = active?.progress ?? (project.status === "succeeded" ? 1 : 0);
+    const runtimeStart = active?.started_at ?? project.created_at;
+    const runtimeState = active?.job_status === "queued"
+      ? "queued"
+      : active?.stage?.startsWith("Denoising") || active
+        ? "running"
+        : project.status === "succeeded" ? "completed" : project.status === "failed" ? "interrupted" : "idle";
     const base = `/api/projects/${project.id}`;
+    const runtime = {
+      state: runtimeState,
+      stage: active?.stage ?? null,
+      progress: active ? runtimeProgress : total ? completed / total : 0,
+      queue_position: active?.queue_position ?? null,
+      started_at: runtimeStart,
+      elapsed_seconds: runtimeStart ? Math.max(0, Math.round((Date.now() - new Date(runtimeStart).getTime()) / 1000)) : null,
+      last_heartbeat_at: project.last_heartbeat_at ?? active?.last_heartbeat_at ?? null,
+      active_kind: activeKind,
+      active_index: active?.idx ?? null,
+      active_total: activeKind === "segment" ? segmentsTotal : activeKind === "window" ? windowsTotal : null,
+      job_id: active?.job_id ?? null,
+      upstream_id: active?.job_id ?? null,
+      job_status: active?.job_status ?? null,
+      step: active?.step ?? null,
+      steps: active?.denoise_steps ?? null,
+      step_seconds: active?.step_seconds ?? null,
+      eta_seconds: active?.eta_seconds ?? null,
+      message: active?.stage ?? project.error ?? null,
+    };
     return {
       ...project,
       source: project.source_asset ? this.assetView(project.source_asset) : null,
       master: config.masterAsset ? this.assetView(config.masterAsset) : null,
       final: config.finalAsset ? { ...this.assetView(config.finalAsset), url: `${base}/files/final` } : null,
       config,
-      progress: total ? completed / total : 0,
+      progress: runtime.progress,
       completed,
       total,
+      working,
+      runtime,
       segments,
       windows,
       events: this.db.events(project.id).slice(-40),
@@ -779,3 +904,6 @@ export class ProjectService {
     return { id: asset.id, url: `/api/projects/assets/${asset.id}`, width: asset.width, height: asset.height, duration: asset.duration, frames: asset.frames };
   }
 }
+
+
+

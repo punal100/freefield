@@ -1,5 +1,5 @@
 // The pages that are not a workspace: Explore (home), Apps (the store), Library and the VRAM map.
-import { api, el, icon, masonry } from "./util.js";
+import { api, el, icon, masonry, toast } from "./util.js";
 import { t } from "./i18n.js";
 import { apps, byId, CATEGORIES, HERO, START_HERE, hosted, tagline, iconOf, fitOf, categoryOf, studioOf, menuGroups } from "./catalog.js";
 import { exampleItem, thumb, hoverPlay, optionTile } from "./media.js";
@@ -182,25 +182,59 @@ function libSeconds(value) {
 }
 
 function longFormLibrary(body) {
-  body.replaceChildren(el("div", { class: "empty" }, "Loading long-form generations…"));
-  api("/api/projects").then((data) => {
-    const finished = (data.projects || []).filter((project) => project.final?.url);
-    if (!finished.length) {
-      body.replaceChildren(el("div", { class: "empty" }, "No finished long-form projects yet. Create one in Long-form."));
-      return;
+  body.replaceChildren(el("div", { class: "empty" }, "Loading H3 Studio work…"));
+  const draw = () => Promise.all([api("/api/projects"), api("/api/work")]).then(([projectData, workData]) => {
+    const all = projectData.projects || [];
+    const finished = all.filter((project) => project.final?.url);
+    const live = (workData.items || []).filter((item) => item.kind === "project"
+      ? item.status !== "succeeded" && item.status !== "canceled"
+      : item.kind === "foreign_job");
+    const sections = [];
+    if (live.length) {
+      sections.push(el("div", { class: "sec-head" }, el("div", {},
+        el("h3", { class: "display" }, "Working now"),
+        el("p", {}, "Active and queued H3 work · IDs, stages and queue order are live"))));
+      sections.push(el("div", { class: "lib-work" }, ...live.map((item) => {
+        const project = all.find((p) => p.id === item.owner_id);
+        const pct = Math.round(Math.max(0, Math.min(1, Number(item.progress) || 0)) * 100);
+        const eta = Number(item.eta_seconds) > 0 ? ` · ETA ~${libSeconds(item.eta_seconds)}` : "";
+        const elapsed = Number(item.elapsed_seconds) > 0 ? ` · ${libSeconds(item.elapsed_seconds)} elapsed` : "";
+        const queue = item.status === "queued" && item.queue_position ? ` · queue ${item.queue_position}` : "";
+        return el("article", { class: `lib-work-card ${item.status}` },
+          el("div", { class: "lib-work-top" },
+            el("span", { class: "tag dark" }, String(item.status).toUpperCase()),
+            el("code", {}, item.id),
+            item.kind === "project" && ["running", "queued"].includes(item.status)
+              ? el("button", { class: "btn ghost small", type: "button", onclick: async () => {
+                try { await api(`/api/projects/${item.id}/cancel`, { method: "POST" }); await draw(); }
+                catch (error) { toast(error.message, { error: true }); }
+              } }, "Cancel")
+              : null),
+          el("b", {}, project?.prompt?.slice(0, 110) || project?.config?.story?.slice(0, 110) || item.app_name),
+          el("div", { class: `bar project-bar${["running", "queued"].includes(item.status) ? " working" : ""}` },
+            el("i", { style: { width: `${pct}%` } })),
+          el("small", {}, `${pct}%${item.stage ? ` · ${item.stage}` : ""}${queue}${eta}${elapsed}`),
+          item.error ? el("small", { class: "err" }, item.error) : null);
+      })));
     }
-    body.replaceChildren(el("div", { class: "lib-projects" }, ...finished.map((project) => {
-      const duration = Number(project.final.duration || project.target_seconds || 0);
-      return el("a", { class: "lib-project", href: project.final.url, target: "_blank", rel: "noreferrer" },
-        el("video", { src: project.final.url, muted: "", playsinline: "", preload: "metadata" }),
-        el("div", { class: "lib-project-copy" },
-          el("span", { class: "tag dark" }, project.config?.manual ? "MANUAL" : "LONG-FORM"),
-          el("b", {}, project.prompt?.slice(0, 90) || project.config?.story?.slice(0, 90) || project.id),
-          el("small", {}, `${libSeconds(duration)} · ${project.id}`)));
-    })));
+    if (finished.length) {
+      sections.push(el("div", { class: "sec-head" }, el("div", {}, el("h3", { class: "display" }, "Finished"))));
+      sections.push(el("div", { class: "lib-projects" }, ...finished.map((project) => {
+        const duration = Number(project.final.duration || project.target_seconds || 0);
+        return el("a", { class: "lib-project", href: project.final.url, target: "_blank", rel: "noreferrer" },
+          el("video", { src: project.final.url, muted: "", playsinline: "", preload: "metadata" }),
+          el("div", { class: "lib-project-copy" },
+            el("span", { class: "tag dark" }, project.config?.manual ? "MANUAL" : "H3 STUDIO"),
+            el("b", {}, project.prompt?.slice(0, 90) || project.config?.story?.slice(0, 90) || project.id),
+            el("small", {}, `${libSeconds(duration)} · ${project.id}`)));
+      })));
+    }
+    body.replaceChildren(...(sections.length ? sections : [el("div", { class: "empty" },
+      "No H3 Studio projects yet. Create one in H3 Studio.")]));
   }).catch((error) => {
     body.replaceChildren(el("div", { class: "empty" }, error.message));
   });
+  draw();
 }
 
 export function libraryView() {
@@ -210,7 +244,7 @@ export function libraryView() {
   let disposeFeed = null;
   const draw = () => {
     tabs.replaceChildren(...[["mine", "clock"], ["projects", "film"], ["lab", "film"]].map(([id, ic]) => el("button", { type: "button", role: "tab", "aria-selected": String(libTab === id),
-      onclick: () => { libTab = id; draw(); } }, icon(ic), id === "projects" ? "Long-form" : t(`lib.${id}`))));
+      onclick: () => { libTab = id; draw(); } }, icon(ic), id === "projects" ? "H3 Studio" : t(`lib.${id}`))));
     disposeFeed?.();
     disposeFeed = null;
     if (libTab === "projects") {
@@ -278,3 +312,4 @@ export function vramView(gpu) {
     el("div", { class: "vtable" }, ...rows));
   return { node, active: "vram" };
 }
+

@@ -10,7 +10,7 @@ test("every manifest passes the schema and its bindings resolve", () => {
 });
 
 test("ready ComfyUI apps have a workflow on disk", () => {
-  for (const app of apps.filter((a) => a.status === "ready" && a.backend !== "sglang")) {
+  for (const app of apps.filter((a) => a.status === "ready" && a.backend !== "sglang" && a.backend !== "projects")) {
     assert.ok(app.graph, `${app.id} has no workflow loaded`);
   }
 });
@@ -40,3 +40,4 @@ test("apps that share models produce the same model key, so switching between th
 test("templateVars finds placeholders", () => {
   assert.deepEqual(templateVars("{prompt}, shot on a {camera}"), ["prompt", "camera"]);
 });
+

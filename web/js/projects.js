@@ -23,6 +23,27 @@ function fmtDuration(seconds) {
     : `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function runtimeProgressText(data) {
+  const runtime = data.runtime || {};
+  const pct = Math.round((data.progress || 0) * 100);
+  const unit = runtime.active_kind === "segment"
+    ? `Segment ${runtime.active_index}/${runtime.active_total}`
+    : runtime.active_kind === "window"
+      ? `IC window ${runtime.active_index}/${runtime.active_total}`
+      : null;
+  const stage = runtime.stage ? String(runtime.stage) : runtime.state === "queued" ? "Queued" : null;
+  const step = runtime.step && runtime.steps ? `${runtime.step}/${runtime.steps}` : null;
+  const eta = Number(runtime.eta_seconds) > 0 ? `ETA ~${fmtDuration(runtime.eta_seconds)}` : runtime.state === "running" ? "ETA estimating" : null;
+  return [unit, stage, step ? `step ${step}` : null, `${pct}%`, eta].filter(Boolean).join(" · ");
+}
+
+function runtimeElapsedText(data) {
+  const runtime = data.runtime || {};
+  const started = runtime.started_at ? new Date(runtime.started_at).getTime() : null;
+  if (!started) return "";
+  return `Elapsed ${fmtDuration((Date.now() - started) / 1000)}`;
+}
+
 function statusTag(status) {
   return el("span", { class: `tag ${status === "succeeded" ? "" : status === "failed" ? "pink" : "dark"}` }, STATUS_LABEL[status] || status);
 }
@@ -79,6 +100,11 @@ function projectCard(p, actions) {
   const icDone = windows.length > 0 && windows.every((w) => w.status === "succeeded");
   const isRefineOnly = full.kind === "refine";
   const manual = Boolean(full.config?.manual);
+  const live = ACTIVE.has(full.status) || (manual && full.status === "draft");
+  const runningStage = live ? stages.find((s) => s.status === "running") : null;
+  const working = Boolean(full.working || runningStage || windows.some((w) => w.status === "running")) && live;
+  const status = full.status === "draft" && working ? "running" : full.status;
+  const active = ACTIVE.has(status);
   const preview = full.final?.url
     ? { url: full.final.url, final: true }
     : full.master?.url
@@ -93,7 +119,7 @@ function projectCard(p, actions) {
   const final = full.final?.url
     ? el("a", { class: "btn lime small", href: full.final.url, target: "_blank", rel: "noreferrer" }, icon("download"), "Final")
     : null;
-  const cancel = ACTIVE.has(full.status)
+  const cancel = active
     ? el("button", { class: "btn ghost small", type: "button", onclick: async () => {
         try { await api(`/api/projects/${full.id}/cancel`, { method: "POST" }); toast("Project canceled"); actions.refresh(); }
         catch (e) { toast(e.message, { error: true }); }
@@ -108,11 +134,7 @@ function projectCard(p, actions) {
         try { await api(`/api/projects/${full.id}/resume`, { method: "POST" }); toast("Project resumed"); actions.refresh(); }
         catch (e) { toast(e.message, { error: true }); }
       } }, icon("play"), "Resume") : null;
-  const retry = !manual && (full.status === "failed" || full.status === "canceled")
-    ? el("button", { class: "btn ghost small", type: "button", onclick: async () => {
-        try { await api(`/api/projects/${full.id}/start`, { method: "POST" }); toast("Project restarted"); actions.refresh(); }
-        catch (e) { toast(e.message, { error: true }); }
-      } }, icon("redo"), "Retry") : null;
+  const retry = null;
   const refine = !manual && (full.master || full.config?.masterAsset || (full.kind === "refine" && full.source)) && full.status !== "running"
     ? el("button", { class: "btn ghost small", type: "button", onclick: async () => {
         try {
@@ -126,8 +148,11 @@ function projectCard(p, actions) {
   const details = el("button", { class: "btn ghost small", type: "button", onclick: () => actions.toggle(full.id) },
     icon("rows"), actions.expanded === full.id ? "Close" : manual ? "Manual edit" : "Inspect");
 
-  const card = el("article", { class: `project-card ${full.status}` },
-    el("div", { class: "project-media" }, source, statusTag(full.status),
+  const progressText = runningStage
+    ? `Segment ${runningStage.idx}/${stages.length} running`
+    : `${pct}%`;
+  const card = el("article", { class: `project-card ${status}` },
+    el("div", { class: "project-media" }, source, statusTag(status),
       el("span", { class: "project-duration" }, fmtDuration(full.target_seconds))),
     el("div", { class: "project-main" },
       el("div", { class: "project-top" },
@@ -135,12 +160,12 @@ function projectCard(p, actions) {
           el("h3", { class: "project-name" }, full.prompt?.slice(0, 82) || full.config?.story?.slice(0, 82) || full.id)),
         el("span", { class: "project-id" }, full.id)),
       el("div", { class: "project-stages" },
-        stageRow("Extend", isRefineOnly ? "skipped" : stages.length ? `${stages.filter((s) => s.status === "succeeded").length}/${stages.length} segments` : "queued", extensionDone || isRefineOnly, full.status === "running" && !extensionDone),
-        stageRow("Refine", full.kind === "extend" ? "skipped" : windows.length ? `${windows.filter((w) => w.status === "succeeded").length}/${windows.length} windows` : "queued", icDone || full.kind === "extend", full.status === "running" && extensionDone && full.kind !== "extend"),
+        stageRow("Extend", isRefineOnly ? "skipped" : stages.length ? `${stages.filter((s) => s.status === "succeeded").length}/${stages.length} segments` : "queued", extensionDone || isRefineOnly, active && !extensionDone),
+        stageRow("Refine", full.kind === "extend" ? "skipped" : windows.length ? `${windows.filter((w) => w.status === "succeeded").length}/${windows.length} windows` : "queued", icDone || full.kind === "extend", active && extensionDone && full.kind !== "extend"),
         stageRow("Finalize", final ? "ready" : "waiting", !!final, false)),
-      el("div", { class: "bar project-bar" }, el("i", { style: { width: `${pct}%` } })),
+      el("div", { class: `bar project-bar${working ? " working" : ""}` }, el("i", { style: { width: `${pct}%` } })),
       el("div", { class: "project-meta" },
-        el("span", {}, `${pct}%`),
+        el("span", {}, progressText),
         full.config?.story ? el("span", {}, "story context") : null,
         full.config?.segmentPrompts?.filter(Boolean).length ? el("span", {}, `${full.config.segmentPrompts.filter(Boolean).length} segment prompts`) : null,
         qc?.warnings?.length ? el("span", { class: "qc-warn" }, `${qc.warnings.length} QC signals`) : qc ? el("span", { class: "qc-ok" }, "QC clean") : null,
@@ -353,6 +378,8 @@ export function projectsView() {
   let timer = null;
   let disposed = false;
   let kind = "both";
+  let projectMode = "auto";
+  let signature = "";
   const list = el("div", { class: "project-list" });
   const status = el("p", { class: "proj-form-status" });
   const submit = el("button", { class: "generate wide", type: "submit" }, icon("send"), "Create project");
@@ -369,9 +396,18 @@ export function projectsView() {
   const visible = el("input", { type: "number", value: "10", min: "2", max: "12", step: "1" });
   const steps = el("input", { type: "number", value: "8", min: "1", max: "50", step: "1" });
   const target = el("input", { type: "number", value: "120", min: "10", max: "7200", step: "1" });
-  const manualMode = el("input", { type: "checkbox" });
-  const manualToggle = el("label", { class: "proj-manual-toggle" }, manualMode,
-    el("span", {}, el("b", {}, "Manual control"), el("small", {}, "Create the project without auto-start. Add extensions, enhance ranges and assemble from its card.")));
+  const modeButtons = new Map();
+  const modeSeg = el("div", { class: "seg modes proj-mode-seg" }, ...[
+    ["auto", "spark", "Auto"], ["manual", "sliders", "Manual"],
+  ].map(([id, ic, label]) => {
+    const button = el("button", { type: "button", "aria-pressed": String(projectMode === id), onclick: () => {
+      projectMode = id;
+      for (const [key, item] of modeButtons) item.setAttribute("aria-pressed", String(key === id));
+      syncMode();
+    } }, icon(ic), label);
+    modeButtons.set(id, button);
+    return button;
+  }));
   const resolution = el("select", {}, el("option", { value: "2k" }, "2K · 2560×1440"), el("option", { value: "1080p" }, "1080p · 1920×1080"));
   const sampler = el("select", {}, el("option", { value: "up3" }, "up3 · 3 steps"), el("option", { value: "up4" }, "up4 · 4 steps"), el("option", { value: "hf8" }, "hf8 · 8 steps"));
   const kindButtons = new Map();
@@ -411,7 +447,7 @@ export function projectsView() {
           kind, targetSeconds: Number(target.value), prompt: prompt.value, story: story.value,
           segmentPrompts: segmentPrompts.value.split(/\r?\n/), seedBase: Number(seed.value),
           visibleSeconds: Number(visible.value), steps: Number(steps.value),
-          targetResolution: resolution.value, sampler: sampler.value, manual: manualMode.checked,
+          targetResolution: resolution.value, sampler: sampler.value, manual: projectMode === "manual",
         }),
       });
       await upload(`/api/projects/${project.id}/source?name=${encodeURIComponent(file.name)}`, file);
@@ -420,7 +456,7 @@ export function projectsView() {
           await upload(`/api/projects/${project.id}/references?kind=${refKind}&name=${encodeURIComponent(refFile.name)}`, refFile);
         }
       }
-      if (manualMode.checked) {
+      if (projectMode === "manual") {
         status.textContent = "Manual project created. Open its card to add the first step.";
         toast("Manual project created");
       } else {
@@ -436,28 +472,33 @@ export function projectsView() {
       status.textContent = error.message;
       status.className = "proj-form-status err";
     } finally {
-      submit.disabled = false;
+      submit.disabled = projects.some((p) => ACTIVE.has(p.status) || p.working);
       submit.textContent = label;
     }
   } },
     el("div", { class: "proj-form-head" }, el("span", { class: "proj-step" }, "01"), el("div", {}, el("h2", { class: "display" }, "Project blueprint"), el("p", {}, "Set the length, continuity context and the two engines that build the final film."))),
-    el("div", { class: "proj-form-section" }, el("span", { class: "lbl" }, "Pipeline"), kindSeg),
-    el("div", { class: "proj-form-section" }, el("span", { class: "lbl" }, "Control"), manualToggle),
-    el("div", { class: "proj-form-section" }, el("span", { class: "lbl" }, "Target length"), targetPills,
+    el("div", { class: "proj-form-section proj-auto-only" }, el("span", { class: "lbl" }, "Pipeline"), kindSeg),
+    el("div", { class: "proj-form-section" }, el("span", { class: "lbl" }, "Mode"), modeSeg, el("p", { class: "proj-mode-note" }, "Auto builds the whole project. Manual creates a draft; every extension, IC range and assembly is yours to run.")),
+    el("div", { class: "proj-form-section proj-auto-only" }, el("span", { class: "lbl" }, "Target length"), targetPills,
       el("div", { class: "proj-inline" }, el("label", { class: "field" }, el("span", { class: "lbl" }, "Exact seconds"), target),
         el("div", { class: "proj-estimate" }, "Target ", el("b", {}, fmtDuration(Number(target.value))), " · source tail is 2.625 s context"))),
     el("div", { class: "proj-form-section" }, el("span", { class: "lbl" }, "Source"), source.drop),
     el("div", { class: "proj-prompt-grid" },
       el("label", { class: "field" }, el("span", { class: "lbl" }, "Base prompt", el("small", {}, "every segment")), prompt),
       el("label", { class: "field" }, el("span", { class: "lbl" }, "Continuity bible", el("small", {}, "persistent context")), story)),
-    el("label", { class: "field" }, el("span", { class: "lbl" }, "Per-segment prompts", el("small", {}, "one line per segment; overrides after story")), segmentPrompts),
-    el("div", { class: "proj-field-row" },
+    el("label", { class: "field proj-auto-only" }, el("span", { class: "lbl" }, "Per-segment prompts", el("small", {}, "one line per segment; overrides after story")), segmentPrompts),
+    el("div", { class: "proj-field-row proj-auto-only" },
       el("label", { class: "field" }, el("span", { class: "lbl" }, "Seed base"), seed),
       el("label", { class: "field" }, el("span", { class: "lbl" }, "Visible s / segment"), visible),
       el("label", { class: "field" }, el("span", { class: "lbl" }, "Steps"), steps),
       el("label", { class: "field" }, el("span", { class: "lbl" }, "IC resolution"), resolution),
       el("label", { class: "field" }, el("span", { class: "lbl" }, "IC sampler"), sampler)),
     el("div", { class: "proj-reference-grid" }, ...Object.values(refs).map((f) => f.drop)));
+  const syncMode = () => {
+    form.classList.toggle("manual-mode", projectMode === "manual");
+    submit.textContent = projectMode === "manual" ? "Create manual project" : "Create project";
+  };
+  syncMode();
   submit.setAttribute("form", "long-project-form");
 
   const detail = (id) => full.get(id) || null;
@@ -467,18 +508,43 @@ export function projectsView() {
     try { full.set(id, await api(`/api/projects/${id}`)); } catch (error) { toast(error.message, { error: true }); }
     render();
   };
+  const updateLiveCards = () => {
+    for (const card of list.querySelectorAll("[data-project-id]")) {
+      const id = card.getAttribute("data-project-id");
+      const data = (id && full.get(id)) || projects.find((project) => project.id === id);
+      if (!data) continue;
+      const progress = Math.max(0, Math.min(1, Number(data.progress) || 0));
+      const fill = card.querySelector("[data-progress-fill]");
+      if (fill) fill.style.width = `${Math.round(progress * 100)}%`;
+      const text = card.querySelector("[data-progress-text]");
+      if (text) text.textContent = runtimeProgressText(data);
+      const elapsed = card.querySelector("[data-elapsed]");
+      if (elapsed) elapsed.textContent = runtimeElapsedText(data);
+    }
+  };
   const refresh = async () => {
     try {
       const data = await api("/api/projects");
       projects = data.projects || [];
       for (const p of projects) {
         const cached = full.get(p.id);
-        const needsDetail = ACTIVE.has(p.status) || expanded === p.id || !cached
+        const needsDetail = ACTIVE.has(p.status) || p.working || expanded === p.id || !cached
           || cached.status !== p.status || (p.status === "succeeded" && !cached.final);
         if (needsDetail) {
           try { full.set(p.id, await api(`/api/projects/${p.id}`)); } catch { /* keep summary */ }
         }
       }
+      const nextSignature = JSON.stringify(projects.map((project) => {
+        const data = full.get(project.id) || project;
+        return [project.id, project.status, project.working, data.final?.id,
+          data.segments?.map((s) => [s.idx, s.status, s.output_asset]),
+          data.windows?.map((w) => [w.idx, w.status, w.output_asset])];
+      }));
+      if (nextSignature === signature) {
+        updateLiveCards();
+        return;
+      }
+      signature = nextSignature;
       render();
     } catch (error) {
       status.textContent = error.message;
@@ -487,6 +553,8 @@ export function projectsView() {
   };
   const render = () => {
     const actions = { refresh, toggle, expanded, detail };
+    const busyProject = projects.some((p) => ACTIVE.has(p.status) || p.working);
+    if (["Create project", "Create manual project"].includes(submit.textContent)) submit.disabled = busyProject;
     list.replaceChildren(...(projects.length
       ? projects.map((p) => projectCard(p, actions))
       : [el("div", { class: "empty proj-empty" }, icon("film"), el("b", {}, "No long-form projects yet"), el("p", {}, "Create one on the left; the first project is usually a 2-minute proof."))]));
@@ -529,10 +597,15 @@ export function projectsView() {
   updateEstimate();
   timer = setInterval(() => {
     if (disposed) return;
-    if (projects.some((p) => ACTIVE.has(p.status)) || (expanded && full.get(expanded)?.status && ACTIVE.has(full.get(expanded).status))) refresh();
+    if (projects.some((p) => ACTIVE.has(p.status) || p.working) || (expanded && full.get(expanded)?.status && ACTIVE.has(full.get(expanded).status))) refresh();
   }, 3000);
   return {
     node, active: "projects",
     dispose: () => { disposed = true; clearInterval(timer); source.input.onchange = null; for (const f of Object.values(refs)) f.input.onchange = null; },
   };
 }
+
+
+
+
+

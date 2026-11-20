@@ -951,6 +951,16 @@ dl.vals dd { margin: 0; overflow-wrap: anywhere; }
 .lib-project-copy { display: grid; gap: 6px; padding: 12px; }
 .lib-project-copy b { font-size: 13px; line-height: 1.35; }
 .lib-project-copy small { color: var(--dim); font-size: 11.5px; }
+.lib-work { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 22px; }
+.lib-work-card { display: grid; gap: 9px; min-width: 0; padding: 13px; border: 1px solid #25252a; border-radius: var(--r-lg); background: var(--panel); }
+.lib-work-card.running { border-color: #3a3a42; box-shadow: inset 0 0 0 1px #3b3b45; }
+.lib-work-card.failed { border-color: #5a2634; }
+.lib-work-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lib-work-top code { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--dim); font-size: 10.5px; }
+.lib-work-top .btn { margin-left: auto; }
+.lib-work-card b { font-size: 13px; line-height: 1.35; }
+.lib-work-card small { color: var(--dim); font-size: 11.5px; }
+.lib-work-card .err { color: var(--pink); }
 
 /* Manual steps inside a long-form project card */
 .manual-panel { display: grid; gap: 12px; margin-top: 12px; padding-top: 14px; border-top: 1px solid #252529; }
@@ -961,3 +971,12 @@ dl.vals dd { margin: 0; overflow-wrap: anywhere; }
 .proj-manual-toggle input { margin-top: 2px; }
 .proj-manual-toggle span { display: grid; gap: 3px; }
 .proj-manual-toggle small { color: var(--dim); font-size: 11.5px; line-height: 1.35; }
+
+.project-bar.working { overflow: hidden; }
+.project-bar.working i { width: 34% !important; animation: project-working 1.4s ease-in-out infinite; }
+@keyframes project-working { 0% { transform: translateX(-120%); } 100% { transform: translateX(360%); } }
+
+.proj-mode-seg { width: 100%; }
+.proj-mode-seg button { flex: 1; justify-content: center; }
+.proj-mode-note { margin: 0; color: var(--dim); font-size: 12px; line-height: 1.4; }
+.proj-form.manual-mode .proj-auto-only { display: none; }

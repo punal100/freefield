@@ -38,6 +38,7 @@ export type ProjectRow = {
   error: string | null;
   created_at: string;
   updated_at: string;
+  last_heartbeat_at?: string | null;
 };
 
 export type SegmentRow = {
@@ -60,6 +61,15 @@ export type SegmentRow = {
   error: string | null;
   started_at: string | null;
   finished_at: string | null;
+  progress?: number | null;
+  stage?: string | null;
+  queue_position?: number | null;
+  job_status?: string | null;
+  last_heartbeat_at?: string | null;
+  step?: number | null;
+  denoise_steps?: number | null;
+  step_seconds?: number | null;
+  eta_seconds?: number | null;
 };
 
 export type WindowRow = {
@@ -77,6 +87,15 @@ export type WindowRow = {
   error: string | null;
   started_at: string | null;
   finished_at: string | null;
+  progress?: number | null;
+  stage?: string | null;
+  queue_position?: number | null;
+  job_status?: string | null;
+  last_heartbeat_at?: string | null;
+  step?: number | null;
+  denoise_steps?: number | null;
+  step_seconds?: number | null;
+  eta_seconds?: number | null;
 };
 
 export type NewAsset = Omit<AssetRow, "created_at">;
@@ -96,7 +115,8 @@ CREATE TABLE IF NOT EXISTS projects (
   config_json TEXT,
   error TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  last_heartbeat_at TEXT
 );
 CREATE TABLE IF NOT EXISTS assets (
   id TEXT PRIMARY KEY,
@@ -136,6 +156,15 @@ CREATE TABLE IF NOT EXISTS project_segments (
   error TEXT,
   started_at TEXT,
   finished_at TEXT,
+  progress REAL,
+  stage TEXT,
+  queue_position INTEGER,
+  job_status TEXT,
+  last_heartbeat_at TEXT,
+  step INTEGER,
+  denoise_steps INTEGER,
+  step_seconds REAL,
+  eta_seconds REAL,
   PRIMARY KEY (project_id, idx)
 );
 CREATE TABLE IF NOT EXISTS ic_windows (
@@ -153,6 +182,15 @@ CREATE TABLE IF NOT EXISTS ic_windows (
   error TEXT,
   started_at TEXT,
   finished_at TEXT,
+  progress REAL,
+  stage TEXT,
+  queue_position INTEGER,
+  job_status TEXT,
+  last_heartbeat_at TEXT,
+  step INTEGER,
+  denoise_steps INTEGER,
+  step_seconds REAL,
+  eta_seconds REAL,
   PRIMARY KEY (project_id, idx)
 );
 CREATE TABLE IF NOT EXISTS jobs (
@@ -166,7 +204,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   next_poll_at TEXT,
   last_error TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  last_heartbeat_at TEXT
 );
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -199,8 +238,27 @@ export class ProjectDB {
     this.dbPath = join(this.stateDir, "freefield.sqlite");
     this.db = new DatabaseSync(this.dbPath, { timeout: 5000 });
     this.db.exec(SCHEMA);
+    const ensureColumn = (table: string, column: string, type: string) => {
+      const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+      if (!columns.some((item) => item.name === column)) {
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      }
+    };
+    ensureColumn("projects", "last_heartbeat_at", "TEXT");
+    for (const table of ["project_segments", "ic_windows"]) {
+      ensureColumn(table, "progress", "REAL");
+      ensureColumn(table, "stage", "TEXT");
+      ensureColumn(table, "queue_position", "INTEGER");
+      ensureColumn(table, "job_status", "TEXT");
+      ensureColumn(table, "last_heartbeat_at", "TEXT");
+      ensureColumn(table, "step", "INTEGER");
+      ensureColumn(table, "denoise_steps", "INTEGER");
+      ensureColumn(table, "step_seconds", "REAL");
+      ensureColumn(table, "eta_seconds", "REAL");
+    }
     const row = this.db.prepare("SELECT version FROM schema_version LIMIT 1").get() as { version?: number } | undefined;
-    if (!row) this.db.prepare("INSERT INTO schema_version(version) VALUES (1)").run();
+    if (!row) this.db.prepare("INSERT INTO schema_version(version) VALUES (2)").run();
+    else if ((row.version ?? 1) < 2) this.db.prepare("UPDATE schema_version SET version = 2").run();
   }
 
   close(): void { this.db.close(); }
@@ -237,10 +295,10 @@ export class ProjectDB {
       .all(Math.max(1, Math.min(1000, limit))) as unknown as ProjectRow[];
   }
 
-  updateProject(id: string, patch: Partial<Pick<ProjectRow, "status" | "source_asset" | "prompt" | "config_json" | "error">>): void {
+  updateProject(id: string, patch: Partial<Pick<ProjectRow, "status" | "source_asset" | "prompt" | "config_json" | "error" | "last_heartbeat_at">>): void {
     const fields: string[] = [];
     const values: unknown[] = [];
-    for (const key of ["status", "source_asset", "prompt", "config_json", "error"] as const) {
+    for (const key of ["status", "source_asset", "prompt", "config_json", "error", "last_heartbeat_at"] as const) {
       if (key in patch) { fields.push(`${key} = ?`); values.push(patch[key]); }
     }
     if (!fields.length) return;
@@ -288,7 +346,7 @@ export class ProjectDB {
   updateSegment(projectId: string, idx: number, patch: Partial<SegmentRow>): void {
     const fields: string[] = [];
     const values: unknown[] = [];
-    for (const key of ["status", "job_id", "upstream_id", "output_asset", "attempts", "error", "started_at", "finished_at"] as const) {
+    for (const key of ["status", "job_id", "upstream_id", "output_asset", "attempts", "error", "started_at", "finished_at", "progress", "stage", "queue_position", "job_status", "last_heartbeat_at", "step", "denoise_steps", "step_seconds", "eta_seconds"] as const) {
       if (key in patch) { fields.push(`${key} = ?`); values.push(patch[key]); }
     }
     if (!fields.length) return;
@@ -313,7 +371,7 @@ export class ProjectDB {
   updateWindow(projectId: string, idx: number, patch: Partial<WindowRow>): void {
     const fields: string[] = [];
     const values: unknown[] = [];
-    for (const key of ["input_asset", "output_asset", "status", "job_id", "attempts", "error", "started_at", "finished_at"] as const) {
+    for (const key of ["input_asset", "output_asset", "status", "job_id", "attempts", "error", "started_at", "finished_at", "progress", "stage", "queue_position", "job_status", "last_heartbeat_at", "step", "denoise_steps", "step_seconds", "eta_seconds"] as const) {
       if (key in patch) { fields.push(`${key} = ?`); values.push(patch[key]); }
     }
     if (!fields.length) return;
@@ -340,3 +398,8 @@ export class ProjectDB {
 function safeJson(text: string): unknown {
   try { return JSON.parse(text); } catch { return null; }
 }
+
+
+
+
+
