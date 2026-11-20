@@ -169,7 +169,7 @@ export function manualView() {
       el("p", { class: "dim" }, "Upload a source, then add and enhance one clip at a time. Nothing runs automatically."),
       source.node,
       field("Session prompt", prompt),
-      el("button", { class: "generate wide", type: "submit", disabled: busy ? "" : undefined }, icon("plus"), "Create manual session"),
+      el("button", { class: "generate wide", type: "submit", disabled: busy ? true : undefined }, icon("plus"), "Create manual session"),
       error ? el("p", { class: "project-error" }, error) : null,
       busy ? el("p", { class: "dim" }, busy) : null);
   };
