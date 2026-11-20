@@ -182,52 +182,55 @@ function libSeconds(value) {
 }
 
 function longFormLibrary(body) {
-  body.replaceChildren(el("div", { class: "empty" }, "Loading H3 Studio work…"));
+  body.replaceChildren(el("div", { class: "empty" }, "Loading H3 Studio projects…"));
   const draw = () => Promise.all([api("/api/projects"), api("/api/work")]).then(([projectData, workData]) => {
-    const all = projectData.projects || [];
-    const finished = all.filter((project) => project.final?.url);
-    const live = (workData.items || []).filter((item) => item.kind === "project"
-      ? item.status !== "succeeded" && item.status !== "canceled"
-      : item.kind === "foreign_job");
+    const projects = projectData.projects || [];
+    const work = new Map((workData.items || []).filter((item) => item.kind === "project").map((item) => [item.id, item]));
+    const cards = projects.map((project) => {
+      const item = work.get(project.id) || {};
+      const active = ["planning", "running"].includes(project.status) || Boolean(project.working)
+        || ["running", "queued"].includes(item.status);
+      return { project, item, active, status: project.status || item.status || "draft" };
+    }).sort((a, b) => String(b.project.created_at).localeCompare(String(a.project.created_at)));
+    const working = cards.filter((card) => card.active);
+    const rest = cards.filter((card) => !card.active);
     const sections = [];
-    if (live.length) {
+    const grid = (items) => el("div", { class: "lib-work" }, ...items.map(({ project, item, status }) => {
+      const pct = Math.round(Math.max(0, Math.min(1, Number(item.progress ?? project.progress) || 0)) * 100);
+      const elapsed = ["running", "queued"].includes(status) && Number(item.elapsed_seconds) > 0
+        ? ` · ${libSeconds(item.elapsed_seconds)} elapsed` : "";
+      const eta = ["running", "queued"].includes(status) && Number(item.eta_seconds) > 0 ? ` · ETA ~${libSeconds(item.eta_seconds)}` : "";
+      const queue = status === "queued" && item.queue_position ? ` · queue ${item.queue_position}` : "";
+      const stage = item.stage || project.runtime?.stage;
+      const error = project.error || item.error;
+      return el("article", { class: `lib-work-card ${status}` },
+        el("div", { class: "lib-work-top" },
+          el("span", { class: "tag dark" }, String(status).toUpperCase()),
+          el("code", {}, project.id),
+          ["planning", "running"].includes(status) || item.status === "queued"
+            ? el("button", { class: "btn ghost small", type: "button", onclick: async () => {
+              try { await api(`/api/projects/${project.id}/cancel`, { method: "POST" }); await draw(); }
+              catch (error) { toast(error.message, { error: true }); }
+            } }, "Cancel")
+            : null),
+        el("b", {}, project.prompt?.slice(0, 110) || project.config?.story?.slice(0, 110) || project.id),
+        el("div", { class: `bar project-bar${["running", "queued", "planning"].includes(status) ? " working" : ""}` },
+          el("i", { style: { width: `${pct}%` } })),
+        el("small", {}, `${pct}%${stage ? ` · ${stage}` : ""}${queue}${eta}${elapsed}`),
+        error ? el("small", { class: "err" }, error) : null,
+        project.final?.url ? el("a", { class: "more", href: project.final.url, target: "_blank", rel: "noreferrer" }, "Watch final") : null);
+    }));
+    if (working.length) {
       sections.push(el("div", { class: "sec-head" }, el("div", {},
         el("h3", { class: "display" }, "Working now"),
-        el("p", {}, "Active and queued H3 work · IDs, stages and queue order are live"))));
-      sections.push(el("div", { class: "lib-work" }, ...live.map((item) => {
-        const project = all.find((p) => p.id === item.owner_id);
-        const pct = Math.round(Math.max(0, Math.min(1, Number(item.progress) || 0)) * 100);
-        const eta = Number(item.eta_seconds) > 0 ? ` · ETA ~${libSeconds(item.eta_seconds)}` : "";
-        const elapsed = Number(item.elapsed_seconds) > 0 ? ` · ${libSeconds(item.elapsed_seconds)} elapsed` : "";
-        const queue = item.status === "queued" && item.queue_position ? ` · queue ${item.queue_position}` : "";
-        return el("article", { class: `lib-work-card ${item.status}` },
-          el("div", { class: "lib-work-top" },
-            el("span", { class: "tag dark" }, String(item.status).toUpperCase()),
-            el("code", {}, item.id),
-            item.kind === "project" && ["running", "queued"].includes(item.status)
-              ? el("button", { class: "btn ghost small", type: "button", onclick: async () => {
-                try { await api(`/api/projects/${item.id}/cancel`, { method: "POST" }); await draw(); }
-                catch (error) { toast(error.message, { error: true }); }
-              } }, "Cancel")
-              : null),
-          el("b", {}, project?.prompt?.slice(0, 110) || project?.config?.story?.slice(0, 110) || item.app_name),
-          el("div", { class: `bar project-bar${["running", "queued"].includes(item.status) ? " working" : ""}` },
-            el("i", { style: { width: `${pct}%` } })),
-          el("small", {}, `${pct}%${item.stage ? ` · ${item.stage}` : ""}${queue}${eta}${elapsed}`),
-          item.error ? el("small", { class: "err" }, item.error) : null);
-      })));
+        el("p", {}, "Active and queued H3 Studio work · IDs, stages and queue order are live"))));
+      sections.push(grid(working));
     }
-    if (finished.length) {
-      sections.push(el("div", { class: "sec-head" }, el("div", {}, el("h3", { class: "display" }, "Finished"))));
-      sections.push(el("div", { class: "lib-projects" }, ...finished.map((project) => {
-        const duration = Number(project.final.duration || project.target_seconds || 0);
-        return el("a", { class: "lib-project", href: project.final.url, target: "_blank", rel: "noreferrer" },
-          el("video", { src: project.final.url, muted: "", playsinline: "", preload: "metadata" }),
-          el("div", { class: "lib-project-copy" },
-            el("span", { class: "tag dark" }, project.config?.manual ? "MANUAL" : "H3 STUDIO"),
-            el("b", {}, project.prompt?.slice(0, 90) || project.config?.story?.slice(0, 90) || project.id),
-            el("small", {}, `${libSeconds(duration)} · ${project.id}`)));
-      })));
+    if (rest.length || !working.length) {
+      sections.push(el("div", { class: "sec-head" }, el("div", {},
+        el("h3", { class: "display" }, working.length ? "Recent projects" : "H3 Studio projects"),
+        el("p", {}, `${cards.length} project${cards.length === 1 ? "" : "s"} · failed, canceled and finished work stays visible`))));
+      sections.push(grid(rest));
     }
     body.replaceChildren(...(sections.length ? sections : [el("div", { class: "empty" },
       "No H3 Studio projects yet. Create one in H3 Studio.")]));
@@ -236,7 +239,6 @@ function longFormLibrary(body) {
   });
   draw();
 }
-
 export function libraryView() {
   const tabs = el("div", { class: "tabs", role: "tablist" });
   const filter = el("div", { class: "pills" });
@@ -312,4 +314,5 @@ export function vramView(gpu) {
     el("div", { class: "vtable" }, ...rows));
   return { node, active: "vram" };
 }
+
 
