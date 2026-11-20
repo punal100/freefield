@@ -120,10 +120,11 @@ function pendingCard(e) {
   const prev = el("img", { class: "preview", alt: "", hidden: true });
   const node = el("div", { class: `rcard pending ${item.type}` },
     el("div", { class: "shimmer" }), prev,
+    el("code", { class: "run-id card-run-id" }, e.id),
     el("button", { class: "mini stop", type: "button", title: t("act.cancel"), "aria-label": t("act.cancel"),
       onclick: (ev) => { ev.stopPropagation(); feed.cancel(e.id).catch((err) => toast(err.message, { error: true })); } }, icon("stop")),
     el("div", { class: "state" }, title, barBox,
-      el("small", {}, `${app?.name ?? e.app} · `, el("code", { class: "run-id" }, e.id), " · ",
+      el("small", {}, `${app?.name ?? e.app} · `,
         el("span", { dataset: { since: e.created } }, fmtSeconds((Date.now() - Date.parse(e.created)) / 1000)))));
   const ar = aspectOf(e);
   if (ar) node.style.aspectRatio = ar;
@@ -225,5 +226,6 @@ export function feedView(host, { app = null, empty = null, dense = false } = {})
   }, 1000);
   return () => { off(); clearInterval(tick); grid._ro?.disconnect(); };
 }
+
 
 

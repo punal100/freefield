@@ -2,7 +2,7 @@
 // one native H3 request, and expose the supervisor's async job as a Comfy-like
 // JobLike so the existing history, progress, cancel, and output paths keep
 // working.
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import type { ComfyEvent } from "@comfyorg/sdk";
 import type { JobLike } from "./history.ts";
@@ -69,9 +69,19 @@ function messageOf(data: JobData): string | null {
   return null;
 }
 
-function denoiseTelemetry(): { step: number; steps: number; stepSeconds: number; etaSeconds: number } | null {
+function sglangLogPath(): string {
+  return process.env.H3_SGLANG_LOG || "/workspace/logs/sglang.log";
+}
+
+function logSize(): number {
+  try { return statSync(sglangLogPath()).size; } catch { return 0; }
+}
+
+function denoiseTelemetry(offset = 0): { step: number; steps: number; stepSeconds: number } | null {
   try {
-    const text = readFileSync(process.env.H3_SGLANG_LOG || "/workspace/logs/sglang.log", "utf8").slice(-200_000);
+    const raw = readFileSync(sglangLogPath());
+    const from = offset > 0 && offset < raw.length ? offset : 0;
+    const text = raw.subarray(Math.max(from, raw.length - 200_000)).toString("utf8");
     const matches = [...text.matchAll(/minimax_h3 denoise:\s*(\d+)%\|[^\n]*?\|\s*(\d+)\/(\d+)\s+\[[^<]*<([^,]+),\s*([\d.]+)s\/it/g)];
     const last = matches.at(-1);
     if (!last) return null;
@@ -79,7 +89,7 @@ function denoiseTelemetry(): { step: number; steps: number; stepSeconds: number;
     const steps = Number(last[3]);
     const stepSeconds = Number(last[5]);
     if (!Number.isFinite(step) || !Number.isFinite(steps) || !Number.isFinite(stepSeconds) || steps <= 0) return null;
-    return { step, steps, stepSeconds, etaSeconds: Math.max(0, (steps - step) * stepSeconds) };
+    return { step, steps, stepSeconds };
   } catch {
     return null;
   }
@@ -100,6 +110,9 @@ export class SglangJob implements JobLike {
   stepSeconds: number | null = null;
   etaSeconds: number | null = null;
 
+  private readonly logOffset: number;
+  private stepObservedAt: number | null = null;
+
   get elapsedSeconds(): number | null {
     if (!this.startedAt) return null;
     const end = this.completedAt ?? new Date();
@@ -111,6 +124,7 @@ export class SglangJob implements JobLike {
   constructor(client: SglangClient, id: string, initial?: JobData) {
     this.client = client;
     this.id = id;
+    this.logOffset = logSize();
     if (initial) this.apply(initial);
   }
 
@@ -134,14 +148,19 @@ export class SglangJob implements JobLike {
     if (typeof data.steps === "number") this.steps = data.steps;
     if (typeof data.step_seconds === "number") this.stepSeconds = data.step_seconds;
     if (typeof data.eta_seconds === "number") this.etaSeconds = data.eta_seconds;
-    if (next === "running" && (!this.step || !this.steps || !this.stepSeconds)) {
-      const telemetry = denoiseTelemetry();
-      if (telemetry) {
+    if (next === "running") {
+      const telemetry = denoiseTelemetry(this.logOffset);
+      if (telemetry && (this.step === null || telemetry.step >= this.step)) {
+        if (this.step !== telemetry.step) this.stepObservedAt = Date.now();
         this.step = telemetry.step;
         this.steps = telemetry.steps;
         this.stepSeconds = telemetry.stepSeconds;
-        this.etaSeconds = telemetry.etaSeconds;
-        this.stage = "Denoising";
+      }
+      if (this.step !== null && this.steps && this.stepSeconds && this.stepObservedAt !== null) {
+        const remaining = (this.steps - this.step) * this.stepSeconds
+          - Math.max(0, Date.now() - this.stepObservedAt) / 1000;
+        this.etaSeconds = Math.max(0, Math.round(remaining));
+        this.stage = this.step >= this.steps ? "Decoding" : "Denoising";
       }
     }
     if (this.progress) {
@@ -517,6 +536,7 @@ export class SglangClient {
     if (!res.ok && res.status !== 404) throw new Error(await this.failure(res));
   }
 }
+
 
 
 
