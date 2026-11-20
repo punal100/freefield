@@ -78,6 +78,7 @@ function projectCard(p, actions) {
   const extensionDone = stages.length > 0 && stages.every((s) => s.status === "succeeded");
   const icDone = windows.length > 0 && windows.every((w) => w.status === "succeeded");
   const isRefineOnly = full.kind === "refine";
+  const manual = Boolean(full.config?.manual);
   const preview = full.final?.url
     ? { url: full.final.url, final: true }
     : full.master?.url
@@ -107,12 +108,12 @@ function projectCard(p, actions) {
         try { await api(`/api/projects/${full.id}/resume`, { method: "POST" }); toast("Project resumed"); actions.refresh(); }
         catch (e) { toast(e.message, { error: true }); }
       } }, icon("play"), "Resume") : null;
-  const retry = full.status === "failed" || full.status === "canceled"
+  const retry = !manual && (full.status === "failed" || full.status === "canceled")
     ? el("button", { class: "btn ghost small", type: "button", onclick: async () => {
         try { await api(`/api/projects/${full.id}/start`, { method: "POST" }); toast("Project restarted"); actions.refresh(); }
         catch (e) { toast(e.message, { error: true }); }
       } }, icon("redo"), "Retry") : null;
-  const refine = (full.master || full.config?.masterAsset || (full.kind === "refine" && full.source)) && full.status !== "running"
+  const refine = !manual && (full.master || full.config?.masterAsset || (full.kind === "refine" && full.source)) && full.status !== "running"
     ? el("button", { class: "btn ghost small", type: "button", onclick: async () => {
         try {
           await api(`/api/projects/${full.id}/refine`, {
@@ -123,14 +124,14 @@ function projectCard(p, actions) {
         } catch (e) { toast(e.message, { error: true }); }
       } }, icon("spark"), "Re-run 2K") : null;
   const details = el("button", { class: "btn ghost small", type: "button", onclick: () => actions.toggle(full.id) },
-    icon("rows"), actions.expanded === full.id ? "Close" : "Inspect");
+    icon("rows"), actions.expanded === full.id ? "Close" : manual ? "Manual edit" : "Inspect");
 
   const card = el("article", { class: `project-card ${full.status}` },
     el("div", { class: "project-media" }, source, statusTag(full.status),
       el("span", { class: "project-duration" }, fmtDuration(full.target_seconds))),
     el("div", { class: "project-main" },
       el("div", { class: "project-top" },
-        el("div", {}, el("span", { class: "proj-kicker" }, full.kind === "extend" ? "EXTENSION" : full.kind === "refine" ? "2K REFINEMENT" : "EXTEND + 2K"),
+        el("div", {}, el("span", { class: "proj-kicker" }, manual ? "MANUAL PROJECT" : full.kind === "extend" ? "EXTENSION" : full.kind === "refine" ? "2K REFINEMENT" : "EXTEND + 2K"),
           el("h3", { class: "project-name" }, full.prompt?.slice(0, 82) || full.config?.story?.slice(0, 82) || full.id)),
         el("span", { class: "project-id" }, full.id)),
       el("div", { class: "project-stages" },
@@ -147,6 +148,137 @@ function projectCard(p, actions) {
       el("div", { class: "project-actions" }, final, retry, resume, refine, details, pause, cancel)),
     actions.expanded === full.id ? projectDetail(full, actions) : null);
   return card;
+}
+
+function manualField(label, control) {
+  return el("label", { class: "field" }, el("span", { class: "lbl" }, label), control);
+}
+
+function manualProjectPanel(p, actions) {
+  const options = () => {
+    const items = [];
+    if (p.source) items.push({ id: p.source.id, label: "Original source", asset: p.source });
+    for (const segment of p.segments || []) {
+      if (segment.output?.id) items.push({ id: segment.output.id, label: `Segment ${segment.idx}`, asset: segment.output });
+    }
+    return items;
+  };
+  const selected = new Set(options().map((item) => item.id));
+  const status = el("p", { class: "proj-form-status" });
+  const extendSource = el("select", {}, ...options().map((item) => el("option", { value: item.id }, item.label)));
+  extendSource.value = options().at(-1)?.id || "";
+  const prompt = el("textarea", { rows: "4" }, p.prompt || "Continue the motion, camera and scene.");
+  const seconds = el("input", { type: "number", min: "4", max: "10", step: "1", value: "5" });
+  const context = el("select", {}, el("option", { value: "63" }, "63 frames"), el("option", { value: "22" }, "22 frames"), el("option", { value: "5" }, "5 frames"));
+  const steps = el("input", { type: "number", min: "1", max: "50", step: "1", value: String(p.config?.steps ?? 8) });
+  const seed = el("input", { type: "number", min: "0", max: "2147483647", step: "1", value: String(p.config?.seedBase ?? 42) });
+  const enhanceSource = el("select", {}, ...options().map((item) => el("option", { value: item.id }, item.label)));
+  enhanceSource.value = options().at(-1)?.id || "";
+  const start = el("input", { type: "number", min: "0", step: "0.1", value: "0" });
+  const end = el("input", { type: "number", min: "2", step: "0.1", value: "10" });
+  const resolution = el("select", {}, el("option", { value: "1080p" }, "1080p"), el("option", { value: "2k" }, "2K"));
+  const sampler = el("select", {}, el("option", { value: "up3" }, "up3"), el("option", { value: "up4" }, "up4"), el("option", { value: "hf8" }, "hf8"));
+  const overlap = el("input", { type: "number", min: "1", max: "60", step: "1", value: "17" });
+  const refs = p.config?.references || [];
+
+  const run = async (label, task) => {
+    status.textContent = label;
+    status.className = "proj-form-status";
+    try {
+      await task();
+      status.textContent = "Done.";
+      await actions.refresh();
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "proj-form-status err";
+      toast(error.message, { error: true });
+    }
+  };
+
+  const extend = () => run("Generating extension…", async () => {
+    const body = {
+      sourceAsset: extendSource.value,
+      seconds: Number(seconds.value),
+      contextFrames: Number(context.value),
+      steps: Number(steps.value),
+      seed: Number(seed.value),
+      prompt: prompt.value.trim(),
+    };
+    if (!body.prompt) throw new Error("extension prompt is required");
+    await api(`/api/projects/${p.id}/manual/extend`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    toast("Extension complete");
+  });
+
+  const enhance = () => run("Enhancing selection…", async () => {
+    const source = options().find((item) => item.id === enhanceSource.value);
+    if (!source) throw new Error("choose a clip to enhance");
+    const duration = Math.max(0, Number(source.asset.duration || 0));
+    const from = Math.max(0, Number(start.value || 0));
+    const to = Math.max(from + 2, Number(end.value || Math.min(duration, 15)));
+    await api(`/api/projects/${p.id}/manual/enhance`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceAsset: source.id,
+        startFrame: Math.round(from * 24),
+        endFrame: Math.round(to * 24),
+        resolution: resolution.value,
+        sampler: sampler.value,
+        overlapFrames: Number(overlap.value),
+      }),
+    });
+    toast("Enhancement complete");
+  });
+
+  const assemble = () => run("Assembling final…", async () => {
+    if (!selected.size) throw new Error("select at least one clip");
+    await api(`/api/projects/${p.id}/manual/assemble`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ assets: [...selected] }),
+    });
+    toast("Final video assembled");
+  });
+
+  const timeline = options().map((item) => {
+    const check = el("input", { type: "checkbox", checked: "checked", onchange: (event) => {
+      if (event.target.checked) selected.add(item.id); else selected.delete(item.id);
+    } });
+    return el("article", { class: "manual-clip" },
+      el("div", { class: "manual-clip-head" }, check, el("b", {}, item.label)),
+      el("video", { class: "manual-video", src: item.asset.url, controls: "", preload: "metadata", playsinline: "" }),
+      el("small", { class: "dim" }, item.asset.duration ? `${Number(item.asset.duration).toFixed(2)} s` : ""));
+  });
+
+  return el("div", { class: "manual-panel" },
+    el("div", { class: "manual-panel-head" },
+      el("div", {}, el("span", { class: "proj-kicker" }, "MANUAL CONTROL"),
+        el("h3", { class: "display" }, "Build this project step by step"),
+        el("p", {}, "Nothing runs automatically. Add one extension at a time, enhance a range, then assemble the cut.")),
+      el("span", { class: "tag dark" }, `${refs.length} references`)),
+    el("div", { class: "manual-controls" },
+      el("section", { class: "manual-section" },
+        el("div", { class: "manual-section-head" }, el("span", { class: "proj-kicker" }, "EXTEND"), el("b", {}, "H3 continuation")),
+        manualField("Source clip", extendSource),
+        el("div", { class: "manual-inline" }, manualField("Visible seconds", seconds), manualField("Context", context)),
+        el("div", { class: "manual-inline" }, manualField("Steps", steps), manualField("Seed", seed)),
+        manualField("Prompt", prompt),
+        el("button", { class: "generate wide", type: "button", onclick: extend }, icon("film"), "Generate extension")),
+      el("section", { class: "manual-section" },
+        el("div", { class: "manual-section-head" }, el("span", { class: "proj-kicker" }, "ENHANCE"), el("b", {}, "IC selected range")),
+        manualField("Clip", enhanceSource),
+        el("div", { class: "manual-inline" }, manualField("Start (s)", start), manualField("End (s)", end)),
+        el("div", { class: "manual-inline" }, manualField("Resolution", resolution), manualField("Sampler", sampler)),
+        manualField("Overlap frames", overlap),
+        el("button", { class: "generate wide", type: "button", onclick: enhance }, icon("spark"), "Enhance selected range")),
+      el("section", { class: "manual-section" },
+        el("div", { class: "manual-section-head" }, el("span", { class: "proj-kicker" }, "ASSEMBLE"), el("b", {}, "Final cut")),
+        el("p", { class: "dim" }, "Use the checkboxes in the timeline to choose clips, then assemble."),
+        el("button", { class: "generate wide", type: "button", onclick: assemble }, icon("download"), "Assemble selected clips"))),
+    el("div", { class: "manual-timeline" }, ...timeline),
+    p.final?.url ? el("div", { class: "manual-final" }, el("span", { class: "proj-kicker" }, "FINAL"),
+      el("video", { src: p.final.url, controls: "", preload: "metadata" })) : null,
+    status);
 }
 
 function projectDetail(p, actions) {
@@ -210,7 +342,8 @@ function projectDetail(p, actions) {
     windowSummary,
     segmentsNode,
     qcNode,
-    eventsNode);
+    eventsNode,
+    p.config?.manual ? manualProjectPanel(p, actions) : null);
 }
 
 export function projectsView() {
@@ -236,6 +369,9 @@ export function projectsView() {
   const visible = el("input", { type: "number", value: "10", min: "2", max: "12", step: "1" });
   const steps = el("input", { type: "number", value: "8", min: "1", max: "50", step: "1" });
   const target = el("input", { type: "number", value: "120", min: "10", max: "7200", step: "1" });
+  const manualMode = el("input", { type: "checkbox" });
+  const manualToggle = el("label", { class: "proj-manual-toggle" }, manualMode,
+    el("span", {}, el("b", {}, "Manual control"), el("small", {}, "Create the project without auto-start. Add extensions, enhance ranges and assemble from its card.")));
   const resolution = el("select", {}, el("option", { value: "2k" }, "2K · 2560×1440"), el("option", { value: "1080p" }, "1080p · 1920×1080"));
   const sampler = el("select", {}, el("option", { value: "up3" }, "up3 · 3 steps"), el("option", { value: "up4" }, "up4 · 4 steps"), el("option", { value: "hf8" }, "hf8 · 8 steps"));
   const kindButtons = new Map();
@@ -275,7 +411,7 @@ export function projectsView() {
           kind, targetSeconds: Number(target.value), prompt: prompt.value, story: story.value,
           segmentPrompts: segmentPrompts.value.split(/\r?\n/), seedBase: Number(seed.value),
           visibleSeconds: Number(visible.value), steps: Number(steps.value),
-          targetResolution: resolution.value, sampler: sampler.value,
+          targetResolution: resolution.value, sampler: sampler.value, manual: manualMode.checked,
         }),
       });
       await upload(`/api/projects/${project.id}/source?name=${encodeURIComponent(file.name)}`, file);
@@ -284,9 +420,14 @@ export function projectsView() {
           await upload(`/api/projects/${project.id}/references?kind=${refKind}&name=${encodeURIComponent(refFile.name)}`, refFile);
         }
       }
-      await api(`/api/projects/${project.id}/start`, { method: "POST" });
-      status.textContent = "Project queued. It will keep running while you use another tab.";
-      toast("Long-form project started");
+      if (manualMode.checked) {
+        status.textContent = "Manual project created. Open its card to add the first step.";
+        toast("Manual project created");
+      } else {
+        await api(`/api/projects/${project.id}/start`, { method: "POST" });
+        status.textContent = "Project queued. It will keep running while you use another tab.";
+        toast("Long-form project started");
+      }
       source.reset();
       for (const field of Object.values(refs)) field.reset();
       updateEstimate();
@@ -301,6 +442,7 @@ export function projectsView() {
   } },
     el("div", { class: "proj-form-head" }, el("span", { class: "proj-step" }, "01"), el("div", {}, el("h2", { class: "display" }, "Project blueprint"), el("p", {}, "Set the length, continuity context and the two engines that build the final film."))),
     el("div", { class: "proj-form-section" }, el("span", { class: "lbl" }, "Pipeline"), kindSeg),
+    el("div", { class: "proj-form-section" }, el("span", { class: "lbl" }, "Control"), manualToggle),
     el("div", { class: "proj-form-section" }, el("span", { class: "lbl" }, "Target length"), targetPills,
       el("div", { class: "proj-inline" }, el("label", { class: "field" }, el("span", { class: "lbl" }, "Exact seconds"), target),
         el("div", { class: "proj-estimate" }, "Target ", el("b", {}, fmtDuration(Number(target.value))), " · source tail is 2.625 s context"))),

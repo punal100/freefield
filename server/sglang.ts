@@ -146,6 +146,7 @@ export class SglangJob implements JobLike {
 
   async cancel(signal?: AbortSignal): Promise<unknown> {
     await this.client.cancel(this.id, signal);
+    void this.client.unload(true).catch(() => {});
     this.status = "canceled";
     this.completedAt ??= new Date();
     return undefined;
@@ -270,17 +271,37 @@ export class SglangClient {
     return conditions;
   }
 
+  private async waitReady(timeoutMs = 45 * 60 * 1000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const status = await this.modelStatus();
+      if (status.state === "ready") return;
+      if (status.state === "error") throw new SglangInputError(status.error ?? "SGLang model load failed");
+      if (["unloaded", "parked", "stopped"].includes(status.state)) return;
+      if (Date.now() >= deadline) throw new SglangInputError("SGLang model did not become ready before the timeout");
+      await sleep(1000);
+    }
+  }
+
   private async postVideo(payload: Record<string, unknown>): Promise<SglangJob> {
     await this.warm();
-    const res = await this.doFetch(`${this.baseUrl}/v1/videos`, {
-      method: "POST",
-      headers: this.headers(true),
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new SglangInputError(await this.failure(res));
-    const body = await res.json() as JobData;
-    if (!body?.id) throw new SglangInputError("SGLang returned no job id");
-    return new SglangJob(this, body.id, body);
+    await this.waitReady();
+    for (let attempt = 0; attempt < 300; attempt++) {
+      const res = await this.doFetch(`${this.baseUrl}/v1/videos`, {
+        method: "POST",
+        headers: this.headers(true),
+        body: JSON.stringify(payload),
+      });
+      if (res.status === 429 && attempt < 299) {
+        await sleep(2000);
+        continue;
+      }
+      if (!res.ok) throw new SglangInputError(await this.failure(res));
+      const body = await res.json() as JobData;
+      if (!body?.id) throw new SglangInputError("SGLang returned no job id");
+      return new SglangJob(this, body.id, body);
+    }
+    throw new SglangInputError("SGLang is still busy; try again");
   }
 
   /**
@@ -327,8 +348,8 @@ export class SglangClient {
     return new ExtendSglangJob(job, source, contextSeconds);
   }
 
-  async unload(): Promise<void> {
-    const res = await this.doFetch(`${this.baseUrl}/v1/model/unload?force=false`, {
+  async unload(force = false): Promise<void> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/model/unload?force=${force ? "true" : "false"}`, {
       method: "POST",
       headers: this.headers(),
     });

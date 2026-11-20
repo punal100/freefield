@@ -1,5 +1,5 @@
 // The pages that are not a workspace: Explore (home), Apps (the store), Library and the VRAM map.
-import { el, icon, masonry } from "./util.js";
+import { api, el, icon, masonry } from "./util.js";
 import { t } from "./i18n.js";
 import { apps, byId, CATEGORIES, HERO, START_HERE, hosted, tagline, iconOf, fitOf, categoryOf, studioOf, menuGroups } from "./catalog.js";
 import { exampleItem, thumb, hoverPlay, optionTile } from "./media.js";
@@ -176,16 +176,47 @@ function flaggedOptions() {
   }));
 }
 
+function libSeconds(value) {
+  const total = Math.max(0, Math.round(Number(value) || 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function longFormLibrary(body) {
+  body.replaceChildren(el("div", { class: "empty" }, "Loading long-form generations…"));
+  api("/api/projects").then((data) => {
+    const finished = (data.projects || []).filter((project) => project.final?.url);
+    if (!finished.length) {
+      body.replaceChildren(el("div", { class: "empty" }, "No finished long-form projects yet. Create one in Long-form."));
+      return;
+    }
+    body.replaceChildren(el("div", { class: "lib-projects" }, ...finished.map((project) => {
+      const duration = Number(project.final.duration || project.target_seconds || 0);
+      return el("a", { class: "lib-project", href: project.final.url, target: "_blank", rel: "noreferrer" },
+        el("video", { src: project.final.url, muted: "", playsinline: "", preload: "metadata" }),
+        el("div", { class: "lib-project-copy" },
+          el("span", { class: "tag dark" }, project.config?.manual ? "MANUAL" : "LONG-FORM"),
+          el("b", {}, project.prompt?.slice(0, 90) || project.config?.story?.slice(0, 90) || project.id),
+          el("small", {}, `${libSeconds(duration)} · ${project.id}`)));
+    })));
+  }).catch((error) => {
+    body.replaceChildren(el("div", { class: "empty" }, error.message));
+  });
+}
+
 export function libraryView() {
   const tabs = el("div", { class: "tabs", role: "tablist" });
   const filter = el("div", { class: "pills" });
   const body = el("div", { style: { display: "flex", flexDirection: "column", minHeight: "40vh" } });
   let disposeFeed = null;
   const draw = () => {
-    tabs.replaceChildren(...[["mine", "clock"], ["lab", "film"]].map(([id, ic]) => el("button", { type: "button", role: "tab", "aria-selected": String(libTab === id),
-      onclick: () => { libTab = id; draw(); } }, icon(ic), t(`lib.${id}`))));
+    tabs.replaceChildren(...[["mine", "clock"], ["projects", "film"], ["lab", "film"]].map(([id, ic]) => el("button", { type: "button", role: "tab", "aria-selected": String(libTab === id),
+      onclick: () => { libTab = id; draw(); } }, icon(ic), id === "projects" ? "Long-form" : t(`lib.${id}`))));
     disposeFeed?.();
     disposeFeed = null;
+    if (libTab === "projects") {
+      longFormLibrary(body);
+      return;
+    }
     if (libTab === "mine") {
       const used = [...new Set(feed.list().map((e) => e.app))].map((id) => byId.get(id)).filter(Boolean);
       filter.replaceChildren(...(used.length > 1 ? [["", t("lib.allapps")], ...used.map((a) => [a.id, a.name])] : []).map(([id, label]) =>

@@ -278,9 +278,16 @@ export class ProjectService {
     };
     this.db.insertSegment(segment);
     this.db.event(id, "manual_extend", { index: idx, sourceAsset, seconds, contextFrames });
+    this.db.updateProject(id, { status: "running", error: null });
     this.active.set(id, { cancelled: false });
     try {
       await this.runSegment(id, project, config, segment, sourceAsset);
+      if (this.db.project(id)?.status === "running") this.db.updateProject(id, { status: "draft", error: null });
+    } catch (error) {
+      if (this.db.project(id)?.status !== "canceled") {
+        this.db.updateProject(id, { status: "failed", error: (error as Error).message });
+      }
+      throw error;
     } finally {
       this.active.delete(id);
     }
@@ -315,11 +322,18 @@ export class ProjectService {
     this.db.clearWindows(id);
     this.db.transaction(() => { for (const window of windows) this.db.insertWindow(icWindowRow(id, window)); });
     this.db.event(id, "manual_enhance", { sourceAsset: clipAsset, startFrame, endFrame, overlapFrames, windows: windows.length });
+    this.db.updateProject(id, { status: "running", error: null });
     this.active.set(id, { cancelled: false });
     try {
       const finalAsset = await this.runIc(id, project, config, clipAsset);
       config.finalAsset = finalAsset;
       this.updateConfig(id, config);
+      if (this.db.project(id)?.status === "running") this.db.updateProject(id, { status: "draft", error: null });
+    } catch (error) {
+      if (this.db.project(id)?.status !== "canceled") {
+        this.db.updateProject(id, { status: "failed", error: (error as Error).message });
+      }
+      throw error;
     } finally {
       this.active.delete(id);
     }

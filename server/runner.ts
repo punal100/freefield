@@ -503,7 +503,7 @@ export class Runner {
   }
 
   async submit(app: App, rawValues: Values, presetId?: string) {
-    if (app.backend !== "sglang" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
+    if (app.backend !== "sglang" && app.backend !== "open-h3-ic" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
     if (app.status !== "ready" && !this.allowDrafts) {
       throw new InputError(`${app.id} is a draft; set FREEFIELD_DRAFTS=1 (or pass --draft) to run it anyway`);
     }
