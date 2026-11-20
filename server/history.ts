@@ -30,6 +30,8 @@ export type Entry = {
   total: number | null;
   values: Record<string, unknown>;
   preset: string | null;
+  /** Human-readable phase before the backend has a job id, or while it runs. */
+  stage?: string | null;
   inputs: { id: string; type: string; file: string; name: string; index?: number }[];
   outputs: { file: string; type: string; name: string; node: string }[];
   error: { message: string; class_type?: string | null; node?: string | null } | null;
@@ -45,6 +47,8 @@ export type JobLike = {
   readonly completedAt: Date | null;
   readonly progress?: { value: number; step: number | null; steps: number | null; currentNodeClass: string | null } | null;
   readonly queuePosition?: number | null;
+  readonly stage?: string | null;
+  readonly etaSeconds?: number | null;
   events(signal?: AbortSignal): AsyncIterable<ComfyEvent>;
   wait(timeoutMs?: number, signal?: AbortSignal): Promise<unknown>;
   cancel(signal?: AbortSignal): Promise<unknown>;
@@ -237,7 +241,7 @@ export class History {
     }
     const entry: Entry = {
       id, app: app.id, status: "starting", job: null, created: new Date().toISOString(), started: null, finished: null,
-      seconds: null, total: null, values: shown, preset: preset ?? null, inputs, outputs: [], error: null,
+      seconds: null, total: null, values: shown, preset: preset ?? null, stage: null, inputs, outputs: [], error: null,
     };
     this.save(entry);
     this.live.set(id, { progress: null, queue: null, preview: null });
@@ -254,6 +258,12 @@ export class History {
     this.live.delete(entry.id);
   }
 
+  /** Record a pre-job phase ("Loading H3 model") so the UI is not stuck on "starting". */
+  note(entry: Entry, stage: string): void {
+    entry.stage = stage;
+    this.save(entry);
+  }
+
   /** Follow a submitted job to the end, then copy its outputs next to the record. */
   async follow(entry: Entry, job: JobLike): Promise<Entry> {
     if (this.removed.has(entry.id)) {   // deleted while it was being submitted
@@ -265,6 +275,7 @@ export class History {
     live.job = job;
     entry.job = job.id;
     entry.status = normStatus(job.status);
+    entry.stage = job.stage ?? (job.status === "queued" ? "Waiting for an H3 worker" : entry.stage);
     this.save(entry);
     if (live.cancelRequested) await job.cancel().catch(() => {});
 
@@ -315,6 +326,11 @@ export class History {
     // the handle's own state moves while wait() polls; mirror it for backends without events
     const tick = setInterval(() => {
       setStatus(normStatus(job.status));
+      if (job.stage && job.stage !== entry.stage) { entry.stage = job.stage; this.save(entry); }
+      else if (job.status === "running" && (!entry.stage || ["Submitting the H3 job", "Waiting for an H3 worker"].includes(entry.stage))) {
+        entry.stage = "Generating";
+        this.save(entry);
+      }
       if (job.queuePosition !== undefined) live.queue = job.queuePosition ?? live.queue;
       const p = job.progress;
       if (p && (p.step !== null || (p.value > 0 && p.value > meter.value))) {
@@ -450,6 +466,8 @@ export class History {
       outputs: e.outputs.map((o) => ({ ...o, url: `${base}/files/${o.file}` })),
       progress: live?.progress ?? null,
       queue: live?.queue ?? null,
+      stage: live?.job?.stage ?? e.stage ?? null,
+      eta_seconds: live?.job?.etaSeconds ?? null,
       preview: live?.preview ? `${base}/preview?n=${live.preview.n}` : null,
     };
   }
@@ -489,3 +507,7 @@ export class History {
     renameSync(tmp, join(folder, "meta.json"));
   }
 }
+
+
+
+

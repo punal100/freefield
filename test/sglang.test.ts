@@ -82,6 +82,16 @@ test("an SGLang app uploads references and maps the form to the H3 request", asy
   });
 });
 
+test("H3 rejects a request over the GPU admission cap before loading the model", async () => {
+  const backend = fakeBackend();
+  const client = new SglangClient({ baseUrl: "http://sglang.invalid", token: "x".repeat(32), fetch: backend.fetch });
+  await assert.rejects(
+    () => client.submitPayload({ seconds: 15, conditions: [{ type: "image", uri: "file:///a", role: "reference" }] }),
+    /at most 10 seconds/,
+  );
+  assert.ok(!backend.requests.some((r) => r.url.endsWith("/v1/model/load")));
+});
+
 test("unload waits until the supervisor has released the model", async () => {
   const backend = fakeBackend();
   const client = new SglangClient({ baseUrl: "http://sglang.invalid", token: "x".repeat(32), fetch: backend.fetch });
@@ -108,3 +118,4 @@ test("an SGLang app without a reference is rejected before submission", async ()
     /at least one image, video, or audio reference/,
   );
 });
+

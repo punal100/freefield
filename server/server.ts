@@ -209,7 +209,8 @@ function startRun(app: App, values: Values, preset?: string) {
   const entry = history.start(app, values, preset);
   void (async () => {
     try {
-      const job = await getRunner().submit(app, values, preset);
+      history.note(entry, "Preparing inputs");
+      const job = await getRunner().submit(app, values, preset, (stage) => history.note(entry, stage));
       contact();
       await history.follow(entry, job);
     } catch (e) {
@@ -297,11 +298,13 @@ async function workView(): Promise<unknown> {
       id: entry.id, owner_id: entry.id, app_id: entry.app, app_name: entry.app,
       kind: "app_run", parent_id: null, job_id: entry.job, upstream_id: entry.job,
       status: rawStatus === "in_progress" ? "running" : rawStatus === "completed" ? "succeeded" : rawStatus,
-      stage: entry.progress?.node ?? (rawStatus === "queued" ? "Queued" : null),
+      stage: entry.stage ?? entry.progress?.node ?? (rawStatus === "queued" ? "Queued" : null),
       queue_position: job?.queue_position ?? (queueOrder.get(String(entry.job)) ?? null),
       progress, completed: null, total: null,
-      elapsed_seconds: entry.started ? Math.max(0, Math.round((Date.now() - new Date(entry.started).getTime()) / 1000)) : null,
-      eta_seconds: null, started_at: entry.started ?? entry.created, finished_at: entry.finished ?? null,
+      elapsed_seconds: entry.started
+        ? Math.max(0, Math.round((Date.now() - new Date(entry.started).getTime()) / 1000))
+        : Math.max(0, Math.round((Date.now() - new Date(entry.created).getTime()) / 1000)),
+      eta_seconds: entry.eta_seconds ?? null, started_at: entry.started ?? entry.created, finished_at: entry.finished ?? null,
       error: entry.error?.message ?? job?.error ?? null, preview_url: entry.preview ?? null,
       final_url: entry.outputs?.[0]?.url ?? null, created_at: entry.created,
     });
@@ -471,4 +474,7 @@ server.listen(port, host, () => {
     + (guard.passcode ? " · passcode required" : "") + (guard.maxRunsPerDay ? ` · ${guard.maxRunsPerDay} runs a day` : ""));
   getProjects().resume();
 });
+
+
+
 

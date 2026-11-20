@@ -193,7 +193,7 @@ function manualProjectPanel(p, actions) {
   const extendSource = el("select", {}, ...options().map((item) => el("option", { value: item.id }, item.label)));
   extendSource.value = options().at(-1)?.id || "";
   const prompt = el("textarea", { rows: "4" }, p.prompt || "Continue the motion, camera and scene.");
-  const seconds = el("input", { type: "number", min: "4", max: "10", step: "1", value: "5" });
+  const seconds = el("input", { type: "number", min: "4", max: "7", step: "1", value: "5" });
   const context = el("select", {}, el("option", { value: "63" }, "63 frames"), el("option", { value: "22" }, "22 frames"), el("option", { value: "5" }, "5 frames"));
   const steps = el("input", { type: "number", min: "1", max: "50", step: "1", value: String(p.config?.steps ?? 8) });
   const seed = el("input", { type: "number", min: "0", max: "2147483647", step: "1", value: String(p.config?.seedBase ?? 42) });
@@ -393,7 +393,7 @@ export function projectsView() {
   const story = el("textarea", { placeholder: "Persistent continuity bible: characters, wardrobe, locations, story state, camera rules, audio/dialogue rules.", rows: "5" });
   const segmentPrompts = el("textarea", { placeholder: "Optional per-segment prompts, one line per extension segment. Line 1 is Segment 1.", rows: "5" });
   const seed = el("input", { type: "number", value: "42", min: "0", max: "2147483647", step: "1" });
-  const visible = el("input", { type: "number", value: "10", min: "2", max: "12", step: "1" });
+  const visible = el("input", { type: "number", value: "5", min: "2", max: "7", step: "1" });
   const steps = el("input", { type: "number", value: "8", min: "1", max: "50", step: "1" });
   const target = el("input", { type: "number", value: "120", min: "10", max: "7200", step: "1" });
   const modeButtons = new Map();
@@ -604,6 +604,7 @@ export function projectsView() {
     dispose: () => { disposed = true; clearInterval(timer); source.input.onchange = null; for (const f of Object.values(refs)) f.input.onchange = null; },
   };
 }
+
 
 
 

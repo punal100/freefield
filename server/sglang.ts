@@ -245,8 +245,10 @@ export class SglangClient {
   }
 
   /** Submit an already-built H3 payload. Used by the long-form project worker. */
-  async submitPayload(payload: Record<string, unknown>): Promise<SglangJob> {
-    return this.postVideo(payload);
+  async submitPayload(payload: Record<string, unknown>, onStage?: (stage: string) => void): Promise<SglangJob> {
+    const seconds = Number(payload.seconds ?? (payload.target as { duration_seconds?: unknown } | undefined)?.duration_seconds ?? 0);
+    this.assertDuration(seconds);
+    return this.postVideo(payload, onStage);
   }
   async warm(): Promise<void> {
     try {
@@ -276,12 +278,26 @@ export class SglangClient {
     return body;
   }
 
-  async submit(app: App, values: Values): Promise<SglangJob | ExtendSglangJob> {
+  validate(app: App, values: Values): void {
+    if (app.adapter === "extend") {
+      const contextFrames = Number(values.context ?? 39);
+      const contextSeconds = Math.max(1, Math.min(120, contextFrames)) / 24;
+      const duration = Number(values.duration ?? 5);
+      this.assertDuration(Math.ceil(Math.min(15, Math.max(4, duration + contextSeconds))));
+      return;
+    }
+    this.assertDuration(Number(values.duration ?? 5));
+  }
+
+  async submit(app: App, values: Values, onStage?: (stage: string) => void): Promise<SglangJob | ExtendSglangJob> {
     if (app.backend !== "sglang") throw new Error(`${app.id} is not an SGLang app`);
-    if (app.adapter === "extend") return this.submitExtend(app, values);
+    if (app.adapter === "extend") return this.submitExtend(app, values, onStage);
     const prompt = String(values.prompt ?? "").trim();
     if (!prompt) throw new SglangInputError("prompt: required");
 
+    const duration = Number(values.duration ?? 5);
+    this.assertDuration(duration);
+    onStage?.("Uploading references");
     const conditions = await this.uploadConditions(values);
     if (!conditions.length) throw new SglangInputError("add at least one image, video, or audio reference");
     if (conditions.every((c) => c.type === "audio")) {
@@ -290,8 +306,8 @@ export class SglangClient {
 
     const aspect = String(values.aspect ?? "16:9").split(/\s/)[0];
     const resolution = Number(values.resolution ?? 0.98);
-    const duration = Number(values.duration ?? 5);
     const seed = Number(values.seed);
+    onStage?.("Preparing the H3 request");
     const payload = {
       prompt,
       task: "ref2va",
@@ -306,7 +322,7 @@ export class SglangClient {
         duration_seconds: duration,
       },
     };
-    return this.postVideo(payload);
+    return this.postVideo(payload, onStage);
   }
 
   /** Upload image, video and audio references in the order H3 tags them. */
@@ -324,44 +340,74 @@ export class SglangClient {
     return conditions;
   }
 
-  private async waitReady(timeoutMs = 45 * 60 * 1000): Promise<void> {
+  private assertDuration(seconds: number): void {
+    const max = Math.max(1, Number(process.env.H3_MAX_REQUEST_SECONDS || 10));
+    if (Number.isFinite(seconds) && seconds > max + 0.01) {
+      throw new SglangInputError(`H3 on this GPU profile accepts at most ${max.toFixed(0)} seconds per request; choose ${max.toFixed(0)} seconds or less`);
+    }
+  }
+
+  private async waitReady(onStage?: (stage: string) => void, timeoutMs = 45 * 60 * 1000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
+    let last = "";
     for (;;) {
       const status = await this.modelStatus();
       if (status.state === "ready") return;
       if (status.state === "error") throw new SglangInputError(status.error ?? "SGLang model load failed");
       if (["unloaded", "parked", "stopped"].includes(status.state)) return;
+      const stage = status.state === "downloading" ? "Downloading the H3 model"
+        : status.state === "loading" ? "Loading the H3 model"
+          : status.state === "parked" ? "Resuming the H3 model"
+            : status.state === "unloading" ? "Waiting for the H3 model to unload"
+              : `Waiting for the H3 model (${status.state})`;
+      if (stage !== last) { last = stage; onStage?.(stage); }
       if (Date.now() >= deadline) throw new SglangInputError("SGLang model did not become ready before the timeout");
       await sleep(1000);
     }
   }
 
-  private async postVideo(payload: Record<string, unknown>): Promise<SglangJob> {
+  private assertPayload(payload: Record<string, unknown>): void {
+    const seconds = Number(payload.seconds ?? (payload.target as { duration_seconds?: unknown } | undefined)?.duration_seconds ?? 0);
+    this.assertDuration(seconds);
+    const conditions = Array.isArray(payload.conditions) ? payload.conditions : [];
+    const maxRefs = Math.max(1, Number(process.env.H3_MAX_REFERENCES || 12));
+    if (conditions.length > maxRefs) {
+      throw new SglangInputError(`H3 on this GPU profile accepts at most ${maxRefs} references; remove ${conditions.length - maxRefs}`);
+    }
+  }
+
+  private async postVideo(payload: Record<string, unknown>, onStage?: (stage: string) => void): Promise<SglangJob> {
+    this.assertPayload(payload);
+    onStage?.("Starting the H3 backend");
     await this.warm();
-    await this.waitReady();
-    for (let attempt = 0; attempt < 300; attempt++) {
+    onStage?.("Waiting for the H3 model");
+    await this.waitReady(onStage);
+    onStage?.("Submitting the H3 job");
+    for (let attempt = 0; attempt < 15; attempt++) {
       const res = await this.doFetch(`${this.baseUrl}/v1/videos`, {
         method: "POST",
         headers: this.headers(true),
         body: JSON.stringify(payload),
       });
-      if (res.status === 429 && attempt < 299) {
+      if (res.status === 429 && attempt < 14) {
+        onStage?.("H3 is busy with another job; waiting for it to finish");
         await sleep(2000);
         continue;
       }
+      if (res.status === 429) throw new SglangInputError("H3 is busy with another job; wait for it to finish or cancel it");
       if (!res.ok) throw new SglangInputError(await this.failure(res));
       const body = await res.json() as JobData;
       if (!body?.id) throw new SglangInputError("SGLang returned no job id");
       return new SglangJob(this, body.id, body);
     }
-    throw new SglangInputError("SGLang is still busy; try again");
+    throw new SglangInputError("H3 is still busy; try again");
   }
 
   /**
    * Extend uses the source tail as Video 1. The request duration includes the
    * context; the wrapper trims that head and concatenates the source.
    */
-  private async submitExtend(app: App, values: Values): Promise<ExtendSglangJob> {
+  private async submitExtend(app: App, values: Values, onStage?: (stage: string) => void): Promise<ExtendSglangJob> {
     const prompt = String(values.prompt ?? "").trim();
     if (!prompt) throw new SglangInputError("prompt: required");
     const source = files(values.clip)[0];
@@ -370,7 +416,9 @@ export class SglangClient {
     const contextSeconds = Math.max(1, Math.min(120, contextFrames)) / 24;
     const duration = Number(values.duration ?? 5);
     const seconds = Math.ceil(Math.min(15, Math.max(4, duration + contextSeconds)));
+    this.assertDuration(seconds);
     const seed = Number(values.seed);
+    onStage?.("Preparing the extension");
     const tail = await extractTail(source, Math.max(1, Math.round(contextFrames)));
     const conditions: { type: string; uri: string; role: string }[] = [];
     for (const file of files(values.ref_images)) {
@@ -397,7 +445,7 @@ export class SglangClient {
       conditions,
       target: { short_edge: 768, aspect_ratio: "16:9", duration_seconds: seconds },
     };
-    const job = await this.postVideo(payload);
+    const job = await this.postVideo(payload, onStage);
     return new ExtendSglangJob(job, source, contextSeconds);
   }
 
@@ -469,4 +517,11 @@ export class SglangClient {
     if (!res.ok && res.status !== 404) throw new Error(await this.failure(res));
   }
 }
+
+
+
+
+
+
+
 

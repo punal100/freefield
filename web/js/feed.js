@@ -67,13 +67,17 @@ class Feed {
 export const feed = new Feed();
 
 export function statusText(e) {
-  if (e.status === "starting") return live.gpuWarm ? t("status.submitting") : t("status.starting");
-  if (e.status === "queued") return e.queue ? t("status.queued.n", { n: e.queue }) : t("status.queued");
+  if (e.status === "starting") return e.stage || (live.gpuWarm ? t("status.submitting") : "Checking the H3 backend");
+  if (e.status === "queued") {
+    const queue = e.queue ? t("status.queued.n", { n: e.queue }) : t("status.queued");
+    return e.stage ? `${e.stage} · ${queue}` : queue;
+  }
   if (e.status === "running") {
     const p = e.progress;
-    let s = t("status.running");
+    let s = e.stage || t("status.running");
     if (p?.step && p?.steps) s += ` · ${t("status.step", { a: p.step, b: p.steps })}`;
     else if (p?.value > 0) s += ` · ${Math.round(p.value * 100)}%`;
+    if (Number(e.eta_seconds) > 0) s += ` · ETA ${fmtSeconds(e.eta_seconds)}`;
     return s;
   }
   return t(`status.${e.status}`);
@@ -119,7 +123,8 @@ function pendingCard(e) {
     el("button", { class: "mini stop", type: "button", title: t("act.cancel"), "aria-label": t("act.cancel"),
       onclick: (ev) => { ev.stopPropagation(); feed.cancel(e.id).catch((err) => toast(err.message, { error: true })); } }, icon("stop")),
     el("div", { class: "state" }, title, barBox,
-      el("small", {}, `${app?.name ?? e.app} · `, el("span", { dataset: { since: e.created } }, fmtSeconds((Date.now() - Date.parse(e.created)) / 1000)))));
+      el("small", {}, `${app?.name ?? e.app} · `, el("code", { class: "run-id" }, e.id), " · ",
+        el("span", { dataset: { since: e.created } }, fmtSeconds((Date.now() - Date.parse(e.created)) / 1000)))));
   const ar = aspectOf(e);
   if (ar) node.style.aspectRatio = ar;
   const update = (fresh) => {
@@ -142,6 +147,7 @@ function failedCard(e) {
   const item = entryItem(e);
   const node = el("div", { class: "rcard failed" },
     el("b", {}, `${t(`status.${e.status}`)} · ${app?.name ?? e.app}`),
+    el("small", { class: "run-id" }, e.id),
     el("pre", {}, e.error?.class_type ? `${e.error.class_type}${e.error.node ? ` (node ${e.error.node})` : ""}: ${e.error.message}` : (e.error?.message || "")),
     el("div", { class: "row" },
       app ? el("button", { class: "btn small lime", type: "button", onclick: () => hooks.retry?.(item) }, icon("redo"), t("act.retry")) : null,
@@ -219,3 +225,5 @@ export function feedView(host, { app = null, empty = null, dense = false } = {})
   }, 1000);
   return () => { off(); clearInterval(tick); grid._ro?.disconnect(); };
 }
+
+

@@ -502,7 +502,7 @@ export class Runner {
     return (await res.json()) as { freed: boolean };
   }
 
-  async submit(app: App, rawValues: Values, presetId?: string) {
+  async submit(app: App, rawValues: Values, presetId?: string, onStage?: (stage: string) => void) {
     if (app.backend !== "sglang" && app.backend !== "open-h3-ic" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
     if (app.status !== "ready" && !this.allowDrafts) {
       throw new InputError(`${app.id} is a draft; set FREEFIELD_DRAFTS=1 (or pass --draft) to run it anyway`);
@@ -511,8 +511,10 @@ export class Runner {
     await preflightMedia(app, values);
     if (app.backend === "sglang") {
       if (!this.sglang) throw new InputError(`${app.id} needs SGLANG_BASE_URL`);
+      this.sglang.validate(app, values);
+      onStage?.("Preparing the GPU");
       await this.prepare(app);   // free the ComfyUI models before SGLang loads
-      const job = await this.sglang.submit(app, values);
+      const job = await this.sglang.submit(app, values, onStage);
       this.sglangJobs.set(job.id, job);
       return job;
     }
@@ -641,4 +643,6 @@ function safeJson(text: string): Record<string, unknown> {
     return { text };
   }
 }
+
+
 

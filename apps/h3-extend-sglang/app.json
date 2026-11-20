@@ -79,10 +79,10 @@
       "type": "slider",
       "label": "New part (s)",
       "min": 2,
-      "max": 10,
+      "max": 7,
       "step": 1,
       "default": 5,
-      "help": "Length of the generated part before the motion context is trimmed."
+      "help": "Length of the generated part before the motion context is trimmed. With 63 context frames the total request must stay within 10 seconds."
     },
     {
       "id": "context",
@@ -124,3 +124,4 @@
   ],
   "notes": "Draft: the adapter cuts the configured tail, adds it as Ref2VA Video 1, keeps up to 9 images and 2 extra videos, generates a continuation, trims the context head, and concatenates source + new part with audio. GPU validation is pending. SGLang V2V is reference conditioning, not an exact latent guide."
 }
+
