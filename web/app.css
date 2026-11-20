@@ -924,3 +924,22 @@ dl.vals dd { margin: 0; overflow-wrap: anywhere; }
 
 .proj-side .side-resizer { display: block; }
 @media (max-width: 1000px) { .proj-side .side-resizer { display: none; } }
+
+/* Manual studio */
+.manual-page { padding: 18px; }
+.manual-layout { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.manual-controls { display: grid; gap: 12px; }
+.manual-section { display: grid; gap: 10px; padding: 14px; border: 1px solid #202023; border-radius: var(--r-lg); background: var(--panel); }
+.manual-section-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.manual-inline { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.manual-refs { display: grid; gap: 8px; padding: 8px 0; }
+.manual-refs summary { cursor: pointer; color: var(--dim); font-size: 12px; }
+.manual-timeline { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin: 16px 0; }
+.manual-clip { display: grid; gap: 8px; padding: 10px; border: 1px solid #202023; border-radius: var(--r-lg); background: var(--panel); }
+.manual-clip-head { display: flex; gap: 8px; align-items: center; }
+.manual-video { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; object-fit: cover; background: #0c0c0e; }
+.manual-video.empty { display: grid; place-content: center; gap: 6px; color: #5c5c64; }
+.manual-final { display: grid; gap: 8px; padding: 14px; border: 1px solid #202023; border-radius: var(--r-lg); background: var(--panel); }
+.manual-final video { width: 100%; max-height: 560px; border-radius: 10px; object-fit: contain; background: #0c0c0e; }
+.manual-create { display: grid; gap: 12px; max-width: 620px; padding: 18px; border: 1px solid #202023; border-radius: var(--r-lg); background: var(--panel); }
+@media (max-width: 900px) { .manual-layout { grid-template-columns: 1fr; } }

@@ -287,6 +287,18 @@ export async function extractWindow(input: string, output: string, startFrame: n
   ], 300_000);
 }
 
+/** Extract a selected 24 fps range for a manual extension/IC pass. */
+export async function extractRange(input: string, output: string, startFrame: number, endFrame: number): Promise<void> {
+  const start = Math.max(0, startFrame) / 24;
+  const duration = Math.max(1, endFrame - startFrame) / 24;
+  await run(FFMPEG, [
+    "-y", "-v", "error", "-ss", start.toFixed(6), "-i", input,
+    "-t", duration.toFixed(6), "-vf", "fps=24,scale=1344:768:force_original_aspect_ratio=increase,crop=1344:768,setpts=PTS-STARTPTS",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", output,
+  ], 600_000);
+}
+
 /** One xfade chain. Chunks keep FFmpeg's argv and filter graph below Windows limits. */
 async function assembleChain(inputs: string[], starts: number[], output: string): Promise<void> {
   if (inputs.length === 1) { await copyTo(inputs[0], output); return; }

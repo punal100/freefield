@@ -83,6 +83,7 @@ export async function handleProjects(
           steps: body.steps === undefined ? undefined : Number(body.steps),
           targetResolution: body.targetResolution === "1080p" ? "1080p" : "2k",
           sampler: body.sampler === "up4" || body.sampler === "hf8" ? body.sampler : "up3",
+          manual: body.manual === true,
         });
         send(res, 202, service.get(project.id));
         return true;
@@ -113,6 +114,18 @@ export async function handleProjects(
       if (kind !== "image" && kind !== "video" && kind !== "audio") throw new MediaError("kind must be image, video or audio");
       const name = url.searchParams.get("name") || `${kind}.bin`;
       send(res, 200, await service.addReference(id, kind, req, name));
+      return true;
+    }
+    if (req.method === "POST" && sub === "manual" && arg === "extend") {
+      send(res, 200, await service.manualExtend(id, await jsonBody(req)));
+      return true;
+    }
+    if (req.method === "POST" && sub === "manual" && arg === "enhance") {
+      send(res, 200, await service.manualEnhance(id, await jsonBody(req)));
+      return true;
+    }
+    if (req.method === "POST" && sub === "manual" && arg === "assemble") {
+      send(res, 200, await service.manualAssemble(id, await jsonBody(req)));
       return true;
     }
     if (req.method === "POST" && sub === "start") { send(res, 202, service.start(id)); return true; }

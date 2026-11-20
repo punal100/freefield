@@ -6,7 +6,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { ProjectDB, type ProjectKind, type ProjectRow, type SegmentRow, type WindowRow } from "./db.ts";
-import { AssetStore, assembleIcWindows, concatVideos, extractTail, extractWindow, MediaError, probeMedia, receive, scanQuality, tempPath, trimHead } from "./assets.ts";
+import { AssetStore, assembleIcWindows, concatVideos, extractRange, extractTail, extractWindow, MediaError, probeMedia, receive, scanQuality, tempPath, trimHead } from "./assets.ts";
 import { configFingerprint, planExtension, planIcWindows, type ExtensionPlanSegment, type IcWindow } from "./planner.ts";
 import { SglangClient } from "./../sglang.ts";
 import { OpenH3IcClient } from "./../open_h3_ic.ts";
@@ -23,6 +23,7 @@ export type ProjectConfig = {
   seedBase?: number;
   sourceName?: string;
   references: { kind: "image" | "video" | "audio"; asset: string; name?: string }[];
+  manual?: boolean;
   masterAsset?: string;
   finalAsset?: string;
   qc?: { checkedAt: string; black: number; freeze: number; silence: number; warnings: string[] };
@@ -40,6 +41,7 @@ export type CreateProjectInput = {
   steps?: number;
   targetResolution?: "1080p" | "2k";
   sampler?: "up3" | "up4" | "hf8";
+  manual?: boolean;
 };
 
 const EXT = /^\.[a-z0-9]{1,8}$/;
@@ -130,6 +132,7 @@ export class ProjectService {
       seedBase,
       references: [],
     };
+    if (input.manual) config.manual = true;
     if (config.contextFrames < 48) throw new MediaError("contextFrames must be at least 48 (2 seconds)");
     if (config.visibleSeconds * 24 + config.contextFrames > 360) throw new MediaError("visible seconds plus context must fit H3's 15 second maximum");
     const id = projectId();
@@ -205,6 +208,7 @@ export class ProjectService {
 
   start(id: string): unknown {
     const project = this.require(id);
+    if (this.config(project).manual) throw new MediaError("manual project: use the manual extend and enhance actions");
     if (!project.source_asset) throw new MediaError("upload a source video first");
     if (project.status === "running") throw new MediaError("project is already running");
     if (project.status === "succeeded") throw new MediaError("project already succeeded; create a new project to change settings");
@@ -243,6 +247,97 @@ export class ProjectService {
     this.exportProject(id);
     this.active.set(id, { cancelled: false });
     void this.run(id).catch((error) => this.fail(id, error));
+    return this.get(id);
+  }
+
+  async manualExtend(id: string, input: Record<string, unknown>): Promise<unknown> {
+    const project = this.require(id);
+    const config = this.config(project);
+    const sourceAsset = String(input.sourceAsset ?? project.source_asset ?? "");
+    const source = this.db.asset(sourceAsset);
+    if (!source) throw new MediaError("manual source asset is missing");
+    const seconds = Math.ceil(Math.max(4, Math.min(15, Number(input.seconds ?? config.visibleSeconds ?? 5))));
+    const contextFrames = Math.max(48, Math.min(303, Math.round(Number(input.contextFrames ?? config.contextFrames ?? 63))));
+    const visibleFrames = seconds * 24;
+    const requestFrames = visibleFrames + contextFrames;
+    if (visibleFrames < 48) throw new MediaError("manual extension must be at least 2 seconds");
+    if (requestFrames > 360) throw new MediaError("manual extension plus context must fit in 15 seconds");
+    const prompt = String(input.prompt ?? project.prompt ?? "").trim();
+    if (!prompt) throw new MediaError("manual extension needs a prompt");
+    const steps = Math.max(1, Math.min(50, Math.round(Number(input.steps ?? config.steps ?? 8))));
+    const seed = Math.max(0, Math.min(2 ** 31 - 1, Math.round(Number(input.seed ?? config.seedBase ?? 42))));
+    const idx = (this.db.segments(id).at(-1)?.idx ?? 0) + 1;
+    const requestSeconds = +(requestFrames / 24).toFixed(6);
+    const segment: SegmentRow = {
+      project_id: id, idx, status: "queued",
+      start_frame: 0, end_frame: visibleFrames, visible_frames: visibleFrames, context_frames: contextFrames,
+      prompt, seed, steps, request_json: JSON.stringify({ manual: true, requestSeconds }),
+      config_hash: configFingerprint({ manual: true, index: idx, requestFrames, seed, steps, prompt }),
+      job_id: null, upstream_id: null, output_asset: null, attempts: 0, error: null,
+      started_at: null, finished_at: null,
+    };
+    this.db.insertSegment(segment);
+    this.db.event(id, "manual_extend", { index: idx, sourceAsset, seconds, contextFrames });
+    this.active.set(id, { cancelled: false });
+    try {
+      await this.runSegment(id, project, config, segment, sourceAsset);
+    } finally {
+      this.active.delete(id);
+    }
+    return this.get(id);
+  }
+
+  async manualEnhance(id: string, input: Record<string, unknown>): Promise<unknown> {
+    const project = this.require(id);
+    if (!this.ic) throw new MediaError("OPEN_H3_IC_BASE_URL is not configured");
+    const config = this.config(project);
+    const sourceAsset = String(input.sourceAsset ?? project.source_asset ?? "");
+    const source = this.db.asset(sourceAsset);
+    if (!source) throw new MediaError("manual source asset is missing");
+    const sourceFrames = source.frames ?? Math.round((source.duration ?? 0) * 24);
+    const startFrame = Math.max(0, Math.min(sourceFrames - 1, Math.round(Number(input.startFrame ?? 0))));
+    const endFrame = Math.max(startFrame + 1, Math.min(sourceFrames, Math.round(Number(input.endFrame ?? sourceFrames))));
+    if (endFrame - startFrame < 48) throw new MediaError("manual enhancement needs at least 2 seconds");
+    let clipAsset = sourceAsset;
+    if (startFrame > 0 || endFrame < sourceFrames) {
+      const clip = join(this.projectDir(id), "staging", `manual-range-${randomBytes(3).toString("hex")}.mp4`);
+      await extractRange(this.assets.absolute(sourceAsset), clip, startFrame, endFrame);
+      clipAsset = await this.assets.ingest(clip, "manual-range.mp4");
+    }
+    const clip = this.db.asset(clipAsset)!;
+    const totalFrames = clip.frames ?? Math.round((clip.duration ?? 0) * 24);
+    const overlapFrames = Math.max(1, Math.min(60, Math.round(Number(input.overlapFrames ?? 17))));
+    const windows = planIcWindows({ totalFrames, windowFrames: 124, overlapFrames });
+    if (!windows.length) throw new MediaError("selected range is shorter than one 124-frame IC window");
+    config.targetResolution = input.resolution === "2k" ? "2k" : "1080p";
+    config.sampler = input.sampler === "up4" || input.sampler === "hf8" ? input.sampler : "up3";
+    this.updateConfig(id, config);
+    this.db.clearWindows(id);
+    this.db.transaction(() => { for (const window of windows) this.db.insertWindow(icWindowRow(id, window)); });
+    this.db.event(id, "manual_enhance", { sourceAsset: clipAsset, startFrame, endFrame, overlapFrames, windows: windows.length });
+    this.active.set(id, { cancelled: false });
+    try {
+      const finalAsset = await this.runIc(id, project, config, clipAsset);
+      config.finalAsset = finalAsset;
+      this.updateConfig(id, config);
+    } finally {
+      this.active.delete(id);
+    }
+    return this.get(id);
+  }
+
+  async manualAssemble(id: string, input: Record<string, unknown>): Promise<unknown> {
+    const project = this.require(id);
+    const assets = Array.isArray(input.assets) ? input.assets.map(String) : [];
+    if (!assets.length) throw new MediaError("select at least one clip to assemble");
+    for (const asset of assets) if (!this.db.asset(asset)) throw new MediaError(`asset ${asset} is missing`);
+    const stage = join(this.projectDir(id), "staging", `manual-final-${randomBytes(3).toString("hex")}.mp4`);
+    await concatVideos(assets.map((asset) => this.assets.absolute(asset)), stage);
+    const finalAsset = await this.assets.ingest(stage, "manual-final.mp4");
+    const config = this.config(project);
+    config.finalAsset = finalAsset;
+    this.updateConfig(id, config);
+    this.db.event(id, "manual_assemble", { assets, finalAsset });
     return this.get(id);
   }
 

@@ -13,6 +13,7 @@ import { openViewer } from "./viewer.js";
 import { openCompare } from "./compare.js";
 import { flags } from "./flags.js";
 import { projectsView } from "./projects.js";
+import { manualView } from "./manual.js";
 
 const main = el("main", { id: "main", class: "view" });
 let bar = null;
@@ -32,6 +33,7 @@ function route() {
     location.replace(`#/app/${lastAppFor(studio[1])}`);
     return null;
   }
+  if (hash.startsWith("#/manual")) return manualView();
   if (hash.startsWith("#/projects")) return projectsView();
   if (hash.startsWith("#/apps")) return appsView();
   if (hash.startsWith("#/library")) return libraryView();
