@@ -589,6 +589,10 @@ export class ProjectService {
 
   private async runIc(id: string, project: ProjectRow, config: ProjectConfig, sourceAsset: string): Promise<string> {
     if (!this.ic) throw new MediaError("OPEN_H3_IC_BASE_URL is not configured");
+    if (this.sglang && !this.active.get(id)?.cancelled) {
+      this.db.event(id, "ic", { status: "unloading_h3" });
+      await this.sglang.unload();
+    }
     const sourcePath = this.assets.absolute(sourceAsset);
     const source = this.db.asset(sourceAsset)!;
     const totalFrames = source.frames ?? Math.round((source.duration ?? 0) * 24);
