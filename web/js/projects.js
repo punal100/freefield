@@ -78,8 +78,16 @@ function projectCard(p, actions) {
   const extensionDone = stages.length > 0 && stages.every((s) => s.status === "succeeded");
   const icDone = windows.length > 0 && windows.every((w) => w.status === "succeeded");
   const isRefineOnly = full.kind === "refine";
-  const source = full.source?.url
-    ? el("video", { class: "project-source", src: full.source.url, muted: true, playsinline: "", preload: "metadata" })
+  const preview = full.final?.url
+    ? { url: full.final.url, final: true }
+    : full.master?.url
+      ? { url: full.master.url, final: false }
+      : full.source?.url
+        ? { url: full.source.url, final: false }
+        : null;
+  const source = preview
+    ? el("video", { class: `project-source${preview.final ? " project-final-preview" : ""}`, src: preview.url,
+        controls: preview.final ? "" : undefined, muted: preview.final ? undefined : true, playsinline: "", preload: "metadata" })
     : el("div", { class: "project-source empty-media" }, el("span", {}, icon("film")), el("small", {}, "no source"));
   const final = full.final?.url
     ? el("a", { class: "btn lime small", href: full.final.url, target: "_blank", rel: "noreferrer" }, icon("download"), "Final")
@@ -322,7 +330,10 @@ export function projectsView() {
       const data = await api("/api/projects");
       projects = data.projects || [];
       for (const p of projects) {
-        if (ACTIVE.has(p.status) || expanded === p.id) {
+        const cached = full.get(p.id);
+        const needsDetail = ACTIVE.has(p.status) || expanded === p.id || !cached
+          || cached.status !== p.status || (p.status === "succeeded" && !cached.final);
+        if (needsDetail) {
           try { full.set(p.id, await api(`/api/projects/${p.id}`)); } catch { /* keep summary */ }
         }
       }
