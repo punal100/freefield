@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { receive } from "../projects/assets.ts";
 import { configFingerprint } from "../projects/planner.ts";
+import { mergeFilter, mergePreset, mergeTarget, streamCopyProblem } from "./merge.ts";
 import { loadCapabilities, validateCapabilities, type PrepCapabilities } from "./capabilities.ts";
 import {
   planEnhanceWindows,
@@ -52,7 +53,7 @@ export type PrepExportFile = {
 
 export type PrepExportResult = {
   id: string;
-  mode: "enhance" | "extend";
+  mode: "enhance" | "extend" | "merge";
   files: PrepExportFile[];
   manifest: Record<string, unknown>;
 };
@@ -306,6 +307,58 @@ export class PrepService {
     return result;
   }
 
+  async merge(body: Record<string, unknown>): Promise<PrepExportResult> {
+    const ids = Array.isArray(body.sourceIds) ? body.sourceIds.map((value) => String(value)) : [];
+    if (ids.length < 2) throw new PrepInputError("select at least two source clips to merge");
+    const sources = ids.map((id) => this.source(id));
+    let quality: ReturnType<typeof mergePreset>["quality"];
+    let preset: ReturnType<typeof mergePreset>["preset"];
+    try {
+      ({ quality, preset } = mergePreset(body.quality));
+    } catch (error) {
+      throw new PrepInputError((error as Error).message);
+    }
+    if (quality === "copy") {
+      const problem = streamCopyProblem(sources.map((source) => source.probe));
+      if (problem) throw new PrepInputError(`Match source cannot copy: ${problem}. Choose High quality, Balanced, or Small file.`);
+    }
+    const id = randomUUID();
+    const folder = join(this.root, id);
+    mkdirSync(folder, { recursive: true });
+    const output = join(folder, `${sourceStem(sources[0].name)}-merge-${sources.length}clips-${quality}.mp4`);
+    if (quality === "copy") {
+      const list = join(folder, "concat.txt");
+      const lines = sources.map((source) => `file '${source.path.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`);
+      await writeFile(list, lines.join("\n"));
+      await runFile(process.env.FREEFIELD_FFMPEG || "ffmpeg", [
+        "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list,
+        "-c", "copy", "-movflags", "+faststart", output,
+      ], { timeout: 600_000, maxBuffer: 8 * 2 ** 20 });
+    } else {
+      const target = mergeTarget(sources.map((source) => source.probe), null);
+      const args = ["-y", "-v", "error"];
+      for (const source of sources) args.push("-i", source.path);
+      args.push("-filter_complex", mergeFilter(sources.map((source) => source.probe), target), "-map", target.hasAudio ? "[vout]" : "[v]");
+      if (target.hasAudio) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", preset.audioBitrate || "160k");
+      else args.push("-an");
+      args.push("-c:v", "libx264", "-preset", preset.preset || "medium", "-crf", String(preset.crf ?? 20), "-pix_fmt", "yuv420p", "-movflags", "+faststart", output);
+      await runFile(process.env.FREEFIELD_FFMPEG || "ffmpeg", args, { timeout: 600_000, maxBuffer: 8 * 2 ** 20 });
+    }
+    const probe = await probeSource(output);
+    const name = basename(output);
+    const manifest = {
+      id, mode: "merge", quality, preset: preset.label,
+      sources: sources.map((source) => ({ id: source.id, name: source.name, probe: source.probe })),
+      output: { name, probe },
+      createdAt: new Date().toISOString(),
+      planFingerprint: configFingerprint({ sourceIds: sources.map((source) => source.id), quality }),
+    };
+    await writeFile(join(folder, "manifest.json"), JSON.stringify(manifest, null, 2));
+    const result: PrepExportResult = { id, mode: "merge", files: [{ name, url: `/api/prep/files/${id}/${name}`, bytes: probe.bytes }], manifest };
+    this.exports.set(id, result);
+    return result;
+  }
+
   file(exportId: string, name: string): string | null {
     const result = this.exports.get(exportId);
     if (!result || !result.files.some((file) => file.name === name)) return null;
@@ -321,6 +374,7 @@ export class PrepService {
 }
 
 type PrepCapabilitiesResult = ReturnType<typeof loadCapabilities>;
+
 
 
 

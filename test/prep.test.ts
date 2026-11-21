@@ -8,6 +8,7 @@ import {
   PrepError,
 } from "../server/prep/planner.ts";
 import { loadCapabilities, validateCapabilities } from "../server/prep/capabilities.ts";
+import { mergeFilter, mergePreset, mergeTarget, streamCopyProblem, type MergeProbe } from "../server/prep/merge.ts";
 
 test("enhance windows follow the supplied capability and pin the final window", () => {
   const windows = planEnhanceWindows({
@@ -125,3 +126,30 @@ test("an explicit invalid override fails instead of falling back", () => {
   assert.equal(result.available, false);
 });
 
+
+const mergeBase: MergeProbe = {
+  duration: 3, fps: 24, frames: 72, width: 160, height: 90,
+  videoCodec: "h264", audioCodec: "aac", hasAudio: true,
+};
+
+test("merge presets expose copy and re-encode qualities", () => {
+  assert.equal(mergePreset("copy").preset.crf, null);
+  assert.equal(mergePreset("high").preset.crf, 16);
+  assert.equal(mergePreset("balanced").preset.crf, 20);
+  assert.equal(mergePreset("small").preset.crf, 24);
+});
+
+test("match-source merge rejects incompatible clips", () => {
+  assert.equal(streamCopyProblem([mergeBase, { ...mergeBase }]), null);
+  assert.match(String(streamCopyProblem([mergeBase, { ...mergeBase, width: 320 }])), /dimensions/);
+  assert.match(String(streamCopyProblem([mergeBase, { ...mergeBase, fps: 30 }])), /frame rate/);
+});
+
+test("merge filter normalizes video and fills missing audio", () => {
+  const second = { ...mergeBase, hasAudio: false, audioCodec: null };
+  const target = mergeTarget([mergeBase, second], null);
+  const filter = mergeFilter([mergeBase, second], target);
+  assert.match(filter, /scale=160:90/);
+  assert.match(filter, /anullsrc=r=48000:cl=stereo/);
+  assert.match(filter, /concat=n=2:v=1:a=1/);
+});

@@ -30,16 +30,29 @@ export function prepView() {
     exportCount.textContent = `${count} ${count === 1 ? "clip" : "clips"}`;
     exportTray.hidden = count === 0;
   };
+  const appendExportFiles = (out, label, detail) => {
+    for (const file of out.files) {
+      exportBox.append(el("a", { class: "prep-export-item", href: file.url, target: "_blank", rel: "noreferrer", title: file.name },
+        el("span", { class: "prep-export-copy" },
+          el("span", { class: "prep-export-top" }, el("b", {}, label), el("small", {}, detail)),
+          el("span", { class: "prep-export-name" }, file.name)),
+        icon("download")));
+    }
+    refreshExportTray();
+    exportTray.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
   const selected = new Set();
   const capsHost = el("div", { class: "prep-caps" });
   const fields = el("div", { class: "prep-fields" });
   const mode = { value: "enhance" };
   const source = { value: null };
+  const mergeSources = [];
+  const quality = { value: "balanced" };
   const prep = { value: null };
   const gpu = { value: null };
   let disposed = false;
 
-  const sourceInput = el("input", { type: "file", accept: "video/*", hidden: "" });
+  const sourceInput = el("input", { type: "file", accept: "video/*", multiple: "", hidden: "" });
   const sourceButton = el("button", { class: "prep-source-card", type: "button", onclick: () => sourceInput.click() },
     el("span", { class: "prep-source-ic" }, icon("film")),
     el("span", { class: "prep-source-copy" },
@@ -58,14 +71,16 @@ export function prepView() {
   context.addEventListener("input", syncFrameSeconds);
   const planButton = el("button", { class: "btn lime prep-plan-btn", type: "button", onclick: () => drawPlan(true) },
     icon("check"), "Validate plan");
-  const modeButtons = ["enhance", "extend"].map((id) => {
+  const modeButtons = ["enhance", "extend", "merge"].map((id) => {
     const b = el("button", { type: "button", "aria-pressed": String(mode.value === id), onclick: () => {
       mode.value = id;
       selected.clear();
+      if (id === "merge" && !mergeSources.length && source.value) mergeSources.push(source.value);
       modeButtons.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      drawSourceState();
       drawFields();
       drawPlan();
-    } }, icon(id === "enhance" ? "spark" : "sliders"), id === "enhance" ? "Enhance" : "Extend");
+    } }, icon(id === "enhance" ? "spark" : id === "extend" ? "sliders" : "box"), id === "enhance" ? "Enhance" : id === "extend" ? "Extend" : "Merge");
     return b;
   });
 
@@ -80,6 +95,12 @@ export function prepView() {
           el("div", {},
             el("b", {}, "Export enhancement windows"),
             el("p", {}, "Splits the source into enhancement windows for H3 Regenerate 2K IC. Window size, overlap, source coverage, fps, and audio rules come from the capability document. ", el("a", { class: "more", href: "#/app/h3-regenerate-2k-ic" }, "Open H3 Regenerate 2K IC", icon("chevR")))))
+        : mode.value === "merge"
+        ? el("div", { class: "prep-mode-intro" },
+          el("span", { class: "prep-mode-ic" }, icon("box")),
+          el("div", {},
+            el("b", {}, "Merge clips"),
+            el("p", {}, "Join uploaded clips in rail order. Match source keeps identical streams untouched; the other presets normalize mixed sources.")))
         : el("div", { class: "prep-mode-intro" },
           el("span", { class: "prep-mode-ic" }, icon("sliders")),
           el("div", {},
@@ -153,7 +174,75 @@ export function prepView() {
     capsHost.replaceChildren(...content);
   }
 
+  function drawMergePlan(validate = false) {
+    resultBox.replaceChildren();
+    if (mergeSources.length < 2) {
+      resultBox.append(el("div", { class: "prep-empty" }, icon("box"),
+        el("b", {}, "Add at least two clips"),
+        el("p", {}, "Choose or drop multiple videos; they merge in the order shown in the source list.")));
+      return;
+    }
+    const options = [
+      ["copy", "Match source", "No re-encode. Requires identical codec, size, fps, and audio layout."],
+      ["high", "High quality", "H.264 CRF 16, slow preset, 192k audio."],
+      ["balanced", "Balanced", "H.264 CRF 20, medium preset, 160k audio."],
+      ["small", "Small file", "H.264 CRF 24, medium preset, 128k audio."],
+    ];
+    const qualityGrid = el("div", { class: "prep-quality-grid" });
+    const paintQuality = () => {
+      for (const button of qualityGrid.querySelectorAll("button")) {
+        button.setAttribute("aria-pressed", String(button.dataset.quality === quality.value));
+      }
+    };
+    qualityGrid.append(...options.map(([id, label, description]) => el("button", {
+      class: "prep-quality", type: "button", "data-quality": id, "aria-pressed": String(quality.value === id),
+      onclick: () => { quality.value = id; paintQuality(); },
+    }, el("b", {}, label), el("small", {}, description))));
+    paintQuality();
+    const total = mergeSources.reduce((sum, item) => sum + Number(item.probe?.duration || 0), 0);
+    const rows = mergeSources.map((item, index) => el("div", { class: "prep-plan-row prep-merge-row" },
+      el("span", { class: "prep-plan-index" }, String(index + 1).padStart(2, "0")),
+      el("b", {}, item.name),
+      el("small", {}, `${seconds(item.probe?.duration)} · ${item.probe?.frames ?? "unknown"} frames`)));
+    const mergeButton = el("button", { class: "btn lime", type: "button", onclick: async () => {
+      exportBox.replaceChildren();
+      exportCount.textContent = "0 clips";
+      exportTray.hidden = true;
+      mergeButton.dataset.busy = "1";
+      mergeButton.disabled = true;
+      mergeButton.replaceChildren(icon("download"), "Merging…");
+      status.textContent = `Merging ${mergeSources.length} clips…`;
+      status.className = "prep-status";
+      try {
+        const out = await api("/api/prep/merge", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sourceIds: mergeSources.map((item) => item.id), quality: quality.value }),
+        });
+        const preset = options.find(([id]) => id === quality.value);
+        appendExportFiles(out, "Merged", `${mergeSources.length} clips · ${preset?.[1] || quality.value}`);
+        status.textContent = "Merge ready.";
+        toast("Merge ready");
+      } catch (error) {
+        status.textContent = error.message;
+        status.className = "prep-status err";
+      } finally {
+        delete mergeButton.dataset.busy;
+        mergeButton.disabled = false;
+        mergeButton.replaceChildren(icon("download"), `Merge ${mergeSources.length} clips`);
+      }
+    } }, icon("download"), `Merge ${mergeSources.length} clips`);
+    resultBox.append(
+      el("div", { class: "prep-plan-head" },
+        el("div", {}, el("span", { class: "proj-kicker" }, "MERGE PLAN"), el("h3", { class: "display" }, `${mergeSources.length} clips · ${seconds(total)}`)),
+        mergeButton),
+      el("div", { class: "prep-quality-wrap" }, el("span", { class: "lbl" }, "Merge quality"), qualityGrid),
+      el("div", { class: "prep-plan" }, ...rows));
+    if (validate) status.textContent = "Merge plan ready.";
+    status.className = "prep-status";
+  }
+
   async function drawPlan(validate = false) {
+    if (mode.value === "merge") return drawMergePlan(validate);
     resultBox.replaceChildren();
     if (!source.value) {
       resultBox.append(el("div", { class: "prep-empty" }, icon("scissors"),
@@ -295,16 +384,116 @@ export function prepView() {
     }
   }
 
+  function drawSourceState() {
+    if (mode.value === "merge") {
+      const count = mergeSources.length;
+      sourceButton.classList.toggle("loaded", count > 0);
+      sourceButton.querySelector("b").textContent = count ? `${count} clip${count === 1 ? "" : "s"} ready` : "Add videos";
+      sourceButton.querySelector("small").textContent = count ? "Add more clips or reorder below" : "Choose or drop multiple clips · merged in this order";
+      sourceMeta.replaceChildren();
+      if (!count) return;
+      sourceMeta.append(el("div", { class: "prep-merge-list" }, ...mergeSources.map((item, index) => {
+        const move = (direction) => {
+          const to = index + direction;
+          if (to < 0 || to >= mergeSources.length) return;
+          const [entry] = mergeSources.splice(index, 1);
+          mergeSources.splice(to, 0, entry);
+          drawSourceState();
+          drawPlan();
+        };
+        return el("div", { class: "prep-merge-item" },
+          el("span", { class: "prep-merge-index" }, String(index + 1).padStart(2, "0")),
+          el("div", { class: "prep-merge-copy" },
+            el("b", {}, item.name),
+            el("small", {}, `${seconds(item.probe?.duration)} · ${item.probe?.frames ?? "unknown"} frames`)),
+          el("div", { class: "prep-merge-actions" },
+            el("button", { type: "button", class: "mini", title: "Move up", "aria-label": `Move ${item.name} up`, disabled: index === 0, onclick: () => move(-1) }, "↑"),
+            el("button", { type: "button", class: "mini", title: "Move down", "aria-label": `Move ${item.name} down`, disabled: index === mergeSources.length - 1, onclick: () => move(1) }, "↓"),
+            el("button", { type: "button", class: "mini", title: "Remove", "aria-label": `Remove ${item.name}`, onclick: () => {
+              mergeSources.splice(index, 1);
+              drawSourceState();
+              drawPlan();
+            } }, icon("x"))));
+      })));
+      return;
+    }
+    if (!source.value) {
+      sourceButton.classList.remove("loaded");
+      sourceButton.querySelector("b").textContent = "Load a video";
+      sourceButton.querySelector("small").textContent = "Drop or choose a source · metadata is read server-side";
+      sourceMeta.replaceChildren();
+      return;
+    }
+    const probe = source.value.probe || {};
+    sourceButton.classList.add("loaded");
+    sourceButton.querySelector("b").textContent = source.value.name;
+    sourceButton.querySelector("small").textContent = "Replace source";
+    sourceMeta.replaceChildren(
+      metaRow("Duration", seconds(probe.duration)),
+      metaRow("Frames", probe.frames ?? "unknown"),
+      metaRow("Frame rate", probe.fps ?? "unknown"),
+      metaRow("Size", probe.width && probe.height ? `${probe.width}×${probe.height}` : "unknown"),
+      metaRow("Audio", probe.hasAudio ? (probe.audioCodec || "present") : "none"),
+      metaRow("VFR", probe.variableFrameRate === null ? "unknown" : probe.variableFrameRate ? "yes" : "no"));
+  }
+
+  async function analyzeFile(file) {
+    const res = await fetch(`/api/prep/analyze?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
+    return body;
+  }
+
+  async function loadSingleSource(file) {
+    status.textContent = "Analyzing source…";
+    status.className = "prep-status";
+    try {
+      source.value = await analyzeFile(file);
+      selected.clear();
+      drawSourceState();
+      status.textContent = "Source ready.";
+      syncFrameSeconds();
+      drawFields();
+      await drawPlan();
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "prep-status err";
+    }
+  }
+
+  async function ingestFiles(files) {
+    const videos = [...files].filter((file) => file.type.startsWith("video/") || /\.(mp4|mov|mkv|webm|m4v|avi)$/i.test(file.name));
+    if (!videos.length) {
+      status.textContent = "Choose video files to prepare.";
+      status.className = "prep-status err";
+      return;
+    }
+    if (mode.value !== "merge") return loadSingleSource(videos[0]);
+    status.className = "prep-status";
+    try {
+      for (const [index, file] of videos.entries()) {
+        status.textContent = `Adding clip ${index + 1} / ${videos.length}…`;
+        mergeSources.push(await analyzeFile(file));
+      }
+      status.textContent = `${mergeSources.length} clips ready.`;
+      selected.clear();
+      drawSourceState();
+      drawPlan();
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "prep-status err";
+    }
+  }
+
   const acceptSourceFiles = (files) => {
-    const file = files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("video/") && !/\.(mp4|mov|mkv|webm|m4v|avi)$/i.test(file.name)) {
-      status.textContent = "Drop a video file to prepare.";
+    const videos = [...files].filter((file) => file.type.startsWith("video/") || /\.(mp4|mov|mkv|webm|m4v|avi)$/i.test(file.name));
+    if (!videos.length) {
+      status.textContent = "Drop video files to prepare.";
       status.className = "prep-status err";
       return;
     }
     const transfer = new DataTransfer();
-    transfer.items.add(file);
+    for (const file of videos) transfer.items.add(file);
     sourceInput.files = transfer.files;
     sourceInput.dispatchEvent(new Event("change", { bubbles: true }));
   };
@@ -321,35 +510,9 @@ export function prepView() {
     acceptSourceFiles(event.dataTransfer.files);
   });
   sourceInput.addEventListener("change", async () => {
-    const file = sourceInput.files?.[0];
-    if (!file) return;
-    status.textContent = "Analyzing source…";
-    status.className = "prep-status";
-    try {
-      const res = await fetch(`/api/prep/analyze?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
-      source.value = body;
-      selected.clear();
-      const probe = body.probe || {};
-      sourceMeta.replaceChildren(
-        metaRow("Duration", seconds(probe.duration)),
-        metaRow("Frames", probe.frames ?? "unknown"),
-        metaRow("Frame rate", probe.fps ?? "unknown"),
-        metaRow("Size", probe.width && probe.height ? `${probe.width}×${probe.height}` : "unknown"),
-        metaRow("Audio", probe.hasAudio ? (probe.audioCodec || "present") : "none"),
-        metaRow("VFR", probe.variableFrameRate === null ? "unknown" : probe.variableFrameRate ? "yes" : "no"));
-      sourceButton.classList.add("loaded");
-      sourceButton.querySelector("b").textContent = file.name;
-      sourceButton.querySelector("small").textContent = "Replace source";
-      status.textContent = "Source ready.";
-      syncFrameSeconds();
-      drawFields();
-      await drawPlan();
-    } catch (error) {
-      status.textContent = error.message;
-      status.className = "prep-status err";
-    }
+    const files = [...(sourceInput.files || [])];
+    sourceInput.value = "";
+    if (files.length) await ingestFiles(files);
   });
 
   Promise.all([
@@ -395,7 +558,7 @@ export function prepView() {
       el("header", { class: "prep-head" },
         el("span", { class: "proj-kicker" }, "H3 / PREP"),
         el("h1", { class: "display" }, "Long video ", el("em", {}, "prep")),
-        el("p", {}, "Cut arbitrary-length video into valid H3 enhancement windows or a single extension tail. Limits come from the active capability document.")),
+        el("p", {}, "Cut arbitrary-length video into H3 enhancement windows, export an extension tail, or merge clips in order. Limits come from the active capability profile.")),
       el("main", { class: "prep-main" },
         el("div", { class: "prep-main-head" },
           el("div", {}, el("span", { class: "proj-kicker" }, "WORKBENCH"), el("h2", { class: "display" }, "Plan")),
@@ -405,6 +568,10 @@ export function prepView() {
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
+
+
+
 
 
 

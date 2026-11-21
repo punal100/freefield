@@ -64,6 +64,10 @@ export async function handlePrep(
       send(res, 200, service.plan(await json(req)));
       return true;
     }
+    if (req.method === "POST" && parts.length === 3 && parts[2] === "merge") {
+      send(res, 200, await service.merge(await json(req)));
+      return true;
+    }
     if (req.method === "POST" && parts.length === 3 && parts[2] === "export") {
       send(res, 200, await service.export(await json(req)));
       return true;
@@ -89,5 +93,6 @@ export async function handlePrep(
     return true;
   }
 }
+
 
 
