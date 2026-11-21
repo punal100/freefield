@@ -149,7 +149,7 @@ export class ProjectService {
     if (!prompt && !story && !segmentPrompts.some(Boolean)) throw new MediaError("add a prompt or continuity story");
     const seedBase = Number.isFinite(input.seedBase) ? Math.max(0, Math.min(2 ** 31 - 1, Math.trunc(Number(input.seedBase)))) : 42;
     const config: ProjectConfig = {
-      visibleSeconds: Math.max(2, Math.min(7, input.visibleSeconds ?? 5)),
+      visibleSeconds: Math.max(2, Math.min(12, input.visibleSeconds ?? 5)),
       contextFrames: input.contextFrames ?? 63,
       steps: Math.max(1, Math.min(50, input.steps ?? 8)),
       targetResolution: input.targetResolution ?? "2k",
@@ -162,7 +162,7 @@ export class ProjectService {
     };
     if (input.manual) config.manual = true;
     if (config.contextFrames < 48) throw new MediaError("contextFrames must be at least 48 (2 seconds)");
-    if (config.visibleSeconds * 24 + config.contextFrames > 240) throw new MediaError("H3 on this GPU profile accepts at most 10 seconds including context; reduce the visible length or context");
+    if (config.visibleSeconds * 24 + config.contextFrames > 360) throw new MediaError("H3 accepts at most 15 seconds including context; reduce the visible length or context");
     const id = projectId();
     mkdirSync(this.projectDir(id), { recursive: true });
     const project = this.db.createProject({ id, kind: input.kind, targetSeconds: input.targetSeconds, prompt, config });
@@ -288,12 +288,12 @@ export class ProjectService {
     const sourceAsset = String(input.sourceAsset ?? project.source_asset ?? "");
     const source = this.db.asset(sourceAsset);
     if (!source) throw new MediaError("manual source asset is missing");
-    const seconds = Math.ceil(Math.max(4, Math.min(7, Number(input.seconds ?? config.visibleSeconds ?? 5))));
+    const seconds = Math.ceil(Math.max(4, Math.min(12, Number(input.seconds ?? config.visibleSeconds ?? 5))));
     const contextFrames = Math.max(48, Math.min(303, Math.round(Number(input.contextFrames ?? config.contextFrames ?? 63))));
     const visibleFrames = seconds * 24;
     const requestFrames = visibleFrames + contextFrames;
     if (visibleFrames < 48) throw new MediaError("manual extension must be at least 2 seconds");
-    if (requestFrames > 240) throw new MediaError("H3 on this GPU profile accepts at most 10 seconds including context; reduce the visible length or context");
+    if (requestFrames > 360) throw new MediaError("H3 accepts at most 15 seconds including context; reduce the visible length or context");
     const prompt = String(input.prompt ?? project.prompt ?? "").trim();
     if (!prompt) throw new MediaError("manual extension needs a prompt");
     const steps = Math.max(1, Math.min(50, Math.round(Number(input.steps ?? config.steps ?? 8))));
@@ -564,7 +564,7 @@ export class ProjectService {
     const projectDir = this.projectDir(id);
     const contextFrames = segment.context_frames;
     const requestSeconds = Math.ceil(segment.request_json ? Number(JSON.parse(segment.request_json).requestSeconds) : (segment.visible_frames + contextFrames) / 24);
-    if (requestSeconds > 10) throw new MediaError("H3 on this GPU profile accepts at most 10 seconds including context; reduce the visible length or context");
+    if (requestSeconds > 15) throw new MediaError("H3 accepts at most 15 seconds including context; reduce the visible length or context");
     const tailPath = join(projectDir, "staging", `tail-${segment.idx}-${randomBytes(3).toString("hex")}.mp4`);
     await extractTail(current, tailPath, contextFrames);
     const conditions: { type: string; uri: string; role: string }[] = [];
@@ -906,6 +906,7 @@ export class ProjectService {
     return { id: asset.id, url: `/api/projects/assets/${asset.id}`, width: asset.width, height: asset.height, duration: asset.duration, frames: asset.frames };
   }
 }
+
 
 
 

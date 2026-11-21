@@ -981,7 +981,7 @@ function sidebarPanel(app, rerenderSide) {
   const extendDuration = app.id === "h3-extend-sglang" ? app.inputs.find((inp) => inp.id === "duration") : null;
   const setExtendDurationMax = (contextFrames) => {
     if (!extendDuration) return;
-    const max = Number(contextFrames) >= 63 ? 7 : 8;
+    const max = Math.max(2, Math.floor(15 - Number(contextFrames) / 24));
     extendDuration.max = max;
     f.values.duration = Math.min(max, Math.max(Number(extendDuration.min || 2), Number(f.values.duration) || 5));
   };
@@ -1270,6 +1270,7 @@ export function workspaceView(appId) {
 /** For the viewer's "Recreate" and the feed's "Try again". */
 export function setTab(tab) { wsTab = tab; }
 export { submit as submitApp, hoverPlay, playWhenVisible, sideResizer };
+
 
 
 

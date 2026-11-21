@@ -54,8 +54,7 @@
       },
       "limits": {
         "max_mb": 50,
-        "seconds": [2, 13],
-        "total_seconds": 12
+        "seconds": [2, 15]
       },
       "preprocess": "video24"
     },
@@ -79,10 +78,10 @@
       "type": "slider",
       "label": "New part (s)",
       "min": 2,
-      "max": 8,
+      "max": 13,
       "step": 1,
       "default": 5,
-      "help": "Length of the generated part before the motion context is trimmed. The total request (new part + context) must stay within 10 seconds: 8 s with 48-frame context, 7 s with 63-frame context."
+      "help": "Length of the generated part before the motion context is trimmed. Total request (new part + context) must stay within the official 15-second H3 maximum."
     },
     {
       "id": "context",
@@ -123,5 +122,6 @@
   ],
   "notes": "Draft: the adapter cuts the configured tail, adds it as Ref2VA Video 1, keeps up to 9 images and 2 extra videos, generates a continuation, trims the context head, and concatenates source + new part with audio. GPU validation is pending. SGLang V2V is reference conditioning, not an exact latent guide."
 }
+
 
 

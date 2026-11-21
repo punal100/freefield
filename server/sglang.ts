@@ -366,7 +366,7 @@ export class SglangClient {
   }
 
   private assertDuration(seconds: number): void {
-    const max = Math.max(1, Number(process.env.H3_MAX_REQUEST_SECONDS || 10));
+    const max = Math.max(1, Number(process.env.H3_MAX_REQUEST_SECONDS || 15));
     if (Number.isFinite(seconds) && seconds > max + 0.01) {
       throw new SglangInputError(`H3 on this GPU profile accepts at most ${max.toFixed(0)} seconds per request; choose ${max.toFixed(0)} seconds or less`);
     }
@@ -542,6 +542,7 @@ export class SglangClient {
     if (!res.ok && res.status !== 404) throw new Error(await this.failure(res));
   }
 }
+
 
 
 

@@ -146,10 +146,10 @@
       "type": "slider",
       "label": "Duration (s)",
       "min": 4,
-      "max": 10,
+      "max": 15,
       "step": 1,
       "default": 5,
-      "help": "The 2×A6000 96gb-balanced profile admits up to 10 seconds per request."
+      "help": "Official MiniMax-H3 output range: 4–15 seconds. The running GPU profile still enforces its own memory admission."
     },
     {
       "id": "steps",
@@ -187,4 +187,5 @@
   },
   "notes": "SGLang Ref2VA backend. The supervisor uses the native full-BF16 Ref2VA tree and keeps the DiT resident on a 96 GB-class GPU; smaller GPUs use layerwise DiT streaming. Set H3_PROFILE, H3_NUM_GPUS and H3_ULYSSES_DEGREE on the container. Open H3-Base outputs 768p; 2K is planned as a separate H3-Regenerate-2K-IC app."
 }
+
 
