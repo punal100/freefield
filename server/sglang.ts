@@ -136,7 +136,7 @@ export class SglangJob implements JobLike {
     const value = Number(data.progress);
     if (Number.isFinite(value)) {
       this.progress = {
-        value: next === "succeeded" ? 1 : Math.max(0, Math.min(0.99, value > 1 ? value / 100 : value)),
+        value: next === "succeeded" ? 1 : Math.max(0, Math.min(0.9, value > 1 ? value / 100 : value)),
         step: null,
         steps: null,
         currentNodeClass: "SGLang",
@@ -156,20 +156,29 @@ export class SglangJob implements JobLike {
         this.steps = telemetry.steps;
         this.stepSeconds = telemetry.stepSeconds;
       }
-      if (this.step !== null && this.steps && this.stepSeconds && this.stepObservedAt !== null) {
-        const remaining = (this.steps - this.step) * this.stepSeconds
-          - Math.max(0, Date.now() - this.stepObservedAt) / 1000;
-        this.etaSeconds = Math.max(0, Math.round(remaining));
+      if (this.step !== null && this.steps) {
+        const elapsed = this.startedAt ? Math.max(0, (Date.now() - this.startedAt.getTime()) / 1000) : 0;
+        const perStep = this.step > 0 && elapsed > 0 ? elapsed / this.step : this.stepSeconds;
+        if (perStep) {
+          const remaining = this.step >= this.steps ? 0 : (this.steps - this.step) * perStep;
+          this.etaSeconds = Math.max(1, Math.round(remaining + 45));
+        }
         this.stage = this.step >= this.steps ? "Decoding" : "Denoising";
       }
     }
     if (this.progress) {
       this.progress.step = this.step;
       this.progress.steps = this.steps;
+      if (this.step !== null && this.steps) {
+        const denoise = Math.min(1, this.step / this.steps);
+        this.progress.value = this.step >= this.steps ? 0.96 : Math.min(0.92, 0.02 + denoise * 0.9);
+      }
     }
     if (TERMINAL.has(next)) {
       this.completedAt ??= new Date();
       this.queuePosition = null;
+      if (this.progress) this.progress.value = next === "succeeded" ? 1 : this.progress.value;
+      this.etaSeconds = 0;
       if (next !== "succeeded") this.error = { message: messageOf(data) ?? `SGLang job ${next}` };
     }
   }
@@ -550,6 +559,9 @@ export class SglangClient {
     if (!res.ok && res.status !== 404) throw new Error(await this.failure(res));
   }
 }
+
+
+
 
 
 
