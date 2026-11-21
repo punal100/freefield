@@ -503,7 +503,8 @@ export class Runner {
   }
 
   async submit(app: App, rawValues: Values, presetId?: string, onStage?: (stage: string) => void) {
-    if (app.backend !== "sglang" && app.backend !== "open-h3-ic" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
+    if (app.backend !== "sglang" && app.backend !== "open-h3-ic" && app.backend !== "prep" && !app.workflowPath) throw new InputError(`${app.id} has no workflow yet`);
+    if (app.backend === "prep") throw new InputError(`${app.id} uses the preparation API, not a generation backend`);
     if (app.status !== "ready" && !this.allowDrafts) {
       throw new InputError(`${app.id} is a draft; set FREEFIELD_DRAFTS=1 (or pass --draft) to run it anyway`);
     }
@@ -544,7 +545,8 @@ export class Runner {
   }
 
   /** Resolve a job id after a restart, using the app's backend when known. */
-  async getJob(id: string, backend?: "comfyui" | "sglang" | "open-h3-ic" | "projects"): Promise<JobLike> {
+  async getJob(id: string, backend?: "comfyui" | "sglang" | "open-h3-ic" | "projects" | "prep"): Promise<JobLike> {
+    if (backend === "prep") throw new Error("prep apps have no generation jobs");
     if (backend === "open-h3-ic") {
       const known = this.icJobs.get(id);
       if (known) return known;
@@ -582,7 +584,7 @@ export class Runner {
    * can say 1.0 (history.ts, Meter). Reconnects while the signal is alive; a stream that answers anything
    * but 200 (the job is gone) ends quietly: the poll decides.
    */
-  async *frames(jobId: string, signal: AbortSignal, backend?: "comfyui" | "sglang" | "open-h3-ic" | "projects"): AsyncIterable<Frame> {
+  async *frames(jobId: string, signal: AbortSignal, backend?: "comfyui" | "sglang" | "open-h3-ic" | "projects" | "prep"): AsyncIterable<Frame> {
     if (backend === "sglang" || backend === "open-h3-ic" || backend === "projects" || this.sglangJobs.has(jobId) || this.icJobs.has(jobId)) return;
     const url = `${this.baseUrl}/api/v2/jobs/${encodeURIComponent(jobId)}/events`;
     const headers = { accept: "text/event-stream", ...(this.token ? { authorization: `Bearer ${this.token}` } : {}) };
@@ -643,6 +645,9 @@ function safeJson(text: string): Record<string, unknown> {
     return { text };
   }
 }
+
+
+
 
 
 

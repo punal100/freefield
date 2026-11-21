@@ -985,3 +985,19 @@ dl.vals dd { margin: 0; overflow-wrap: anywhere; }
 .proj-form.manual-mode .proj-auto-only { display: none; }
 
 
+'
+
+/* H3 Long Video Prep */
+.prep-panel { display: grid; gap: 14px; max-width: 1100px; margin: 18px 0 40px; }
+.prep-source { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.prep-meta { display: flex; gap: 8px 14px; flex-wrap: wrap; color: var(--dim); font-size: 12px; }
+.prep-caps { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.prep-capability { margin: 0; color: var(--dim); font-size: 12px; }
+.prep-meta { margin: 0; }
+.prep-warning { margin: 0; color: var(--warn, #e5a50a); font-size: 12px; }
+.prep-fields { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+.prep-result { display: grid; gap: 8px; }
+.prep-row { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--dim); }
+.prep-exports { display: flex; gap: 10px; flex-wrap: wrap; }
+.prep-exports a { display: inline-flex; align-items: center; gap: 6px; }
+'

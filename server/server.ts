@@ -29,6 +29,8 @@ import { Flags } from "./flags.ts";
 import { DOOR_HTML, Guard } from "./guard.ts";
 import { ProjectService } from "./projects/service.ts";
 import { handleProjects } from "./projects/routes.ts";
+import { PrepService } from "./prep/service.ts";
+import { handlePrep } from "./prep/routes.ts";
 
 const root = repoRoot();
 const { apps, problems } = loadRegistry(root);
@@ -46,6 +48,8 @@ const getRunner = () => (runner ??= new Runner());
 const draftsAllowed = process.env.FREEFIELD_DRAFTS === "1";
 const outDir = process.env.FREEFIELD_OUT || join(root, "out");
 let projects: ProjectService | null = null;
+let prep: PrepService | null = null;
+const getPrep = () => (prep ??= new PrepService(process.env.FREEFIELD_PREP_DIR || join(outDir, "prep")));
 const getProjects = () => (projects ??= new ProjectService({
   root: process.env.FREEFIELD_PROJECTS_DIR || join(outDir, "projects"),
 }));
@@ -378,6 +382,7 @@ const server = createServer(async (req, res) => {
       if (req.method === "GET" && parts[1] === "work" && parts.length === 2) {
         return send(res, 200, await workView());
       }
+      if (await handlePrep(getPrep(), req, res, parts, url)) return;
       if (await handleProjects(getProjects(), req, res, parts, url)) return;
       const [, area, id, sub, arg] = parts;
       if (req.method === "GET" && area === "apps" && parts.length === 2) {
@@ -487,6 +492,7 @@ server.listen(port, host, () => {
     + (guard.passcode ? " · passcode required" : "") + (guard.maxRunsPerDay ? ` · ${guard.maxRunsPerDay} runs a day` : ""));
   getProjects().resume();
 });
+
 
 
 

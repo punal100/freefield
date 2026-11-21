@@ -7,6 +7,7 @@ import {
   planExtensionTail,
   PrepError,
 } from "../server/prep/planner.ts";
+import { validateCapabilities } from "../server/prep/capabilities.ts";
 
 test("enhance windows follow the supplied capability and pin the final window", () => {
   const windows = planEnhanceWindows({
@@ -88,4 +89,22 @@ test("extension rejects a visible length outside the capability", () => {
     }),
     /visibleFrames must be/,
   );
+});
+
+test("capability validation accepts only a complete document", () => {
+  const result = validateCapabilities({
+    authority: "fixture",
+    source: { fps: 30, dimensions: { width: 640, height: 360 }, audio: "optional" },
+    enhance: { windowFrames: 91, overlapFrames: 7, minSourceFrames: 70 },
+    extend: { contextFrames: { min: 9, max: 13 }, requestFrames: { min: 31, max: 47 } },
+    export: { videoCodec: "h264", audioCodec: "aac", pixelFormat: "yuv420p", container: "mp4" },
+  });
+  assert.equal(result.available, true);
+  if (result.available) assert.equal(result.enhance?.windowFrames, 91);
+});
+
+test("capability validation reports missing values instead of defaulting", () => {
+  const result = validateCapabilities({ source: { fps: 24, dimensions: null, audio: "optional" } });
+  assert.equal(result.available, false);
+  if (!result.available) assert.ok(result.missing.includes("enhance"));
 });

@@ -13,6 +13,7 @@ import { openViewer } from "./viewer.js";
 import { openCompare } from "./compare.js";
 import { flags } from "./flags.js";
 import { projectsView } from "./projects.js";
+import { prepView } from "./prep.js";
 
 const main = el("main", { id: "main", class: "view" });
 let bar = null;
@@ -25,6 +26,9 @@ function route() {
     if (m[1] === "h3-studio") {
       const app = byId.get(m[1]);
       return { ...projectsView(), app, active: "apps" };
+    }
+    if (m[1] === "h3-long-video-prep") {
+      return { ...prepView(), app: byId.get(m[1]), active: "apps" };
     }
     const view = workspaceView(m[1]);
     const app = view.app;
@@ -111,5 +115,6 @@ window.addEventListener("unhandledrejection", (e) => {
 });
 boot();
 export { byId, t };
+
 
 

@@ -30,9 +30,9 @@
       "description": "draft: planned, workflow may be missing. ready: workflow present and every binding resolves."
     },
     "backend": {
-      "enum": ["comfyui", "sglang", "open-h3-ic", "projects"],
+      "enum": ["comfyui", "sglang", "open-h3-ic", "projects", "prep"],
       "default": "comfyui",
-      "description": "Execution backend. ComfyUI apps use a workflow; SGLang apps send the form values to the SGLang supervisor; Open-H3 IC apps send the draft to the IC sidecar."
+      "description": "Execution backend. ComfyUI apps use a workflow; SGLang apps send the form values to the SGLang supervisor; Open-H3 IC apps send the draft to the IC sidecar; prep apps are local cut/export tools."
     },
     "adapter": {
       "enum": ["extend"],
@@ -242,4 +242,5 @@
     }
   }
 }
+
 

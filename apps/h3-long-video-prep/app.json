@@ -1,0 +1,22 @@
+{
+  "$schema": "../../schema/app.schema.json",
+  "id": "h3-long-video-prep",
+  "name": "H3 Long Video Prep",
+  "section": "video",
+  "summary": "Prepare arbitrary-length video for H3 by exporting valid IC enhancement windows or an extension motion tail.",
+  "higgsfield_feature": "Long video preparation",
+  "pack": "video-h3-sglang",
+  "status": "ready",
+  "backend": "prep",
+  "inputs": [],
+  "outputs": [
+    { "node": "prep", "type": "video", "label": "Prepared clip" }
+  ],
+  "models": [],
+  "credits": [
+    "MiniMax H3",
+    "Open-H3-Regenerate-2K-IC",
+    "SGLang"
+  ],
+  "notes": "Local cut and export tool. Enhance windows and extension tails are driven by the active capability document, not frontend constants."
+}

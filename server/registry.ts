@@ -55,7 +55,7 @@ export type AppManifest = {
   mode_label?: string;
   pack: string;
   status: "draft" | "ready";
-  backend?: "comfyui" | "sglang" | "open-h3-ic" | "projects";
+  backend?: "comfyui" | "sglang" | "open-h3-ic" | "projects" | "prep";
   adapter?: "extend";
   workflow?: string;
   inputs: Input[];
@@ -241,7 +241,7 @@ export function loadRegistry(root = repoRoot()): { apps: App[]; problems: Proble
       } else {
         problems.push({ app: folder, severity, message: `workflow ${manifest.workflow} not found` });
       }
-    } else if (manifest.status === "ready" && app.backend !== "sglang" && app.backend !== "open-h3-ic" && app.backend !== "projects") {
+    } else if (manifest.status === "ready" && app.backend !== "sglang" && app.backend !== "open-h3-ic" && app.backend !== "projects" && app.backend !== "prep") {
       problems.push({ app: folder, severity: "error", message: "ready non-ComfyUI apps need a backend workflow or sidecar" });
     }
     if (app.graph) checkGraph(app, problems, severity);
@@ -260,4 +260,5 @@ export function loadRegistry(root = repoRoot()): { apps: App[]; problems: Proble
   }
   return { apps, problems };
 }
+
 
