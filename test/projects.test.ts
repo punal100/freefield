@@ -37,7 +37,7 @@ test("IC window plan: 120 s", () => {
 test("IC window plan: final tail is included", () => {
   const windows = planIcWindows({ totalFrames: 2880 });
   assert.equal(windows.at(-1)?.startFrame, 2756);
-  assert.equal(windows.at(-1)?.overlapBefore, 81);
+  assert.equal(windows.at(-1)?.overlapBefore, 43);
   assert.equal(new Set(windows.map((w) => `${w.startFrame}:${w.sourceFrames}`)).size, windows.length);
 });
 
@@ -68,3 +68,4 @@ test("project ledger creates a project and segment/event records", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+

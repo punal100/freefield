@@ -16,7 +16,7 @@ test("enhance windows follow the supplied capability and pin the final window", 
   });
   assert.deepEqual(windows.map((w) => w.startFrame), [0, 90, 150]);
   assert.equal(windows.at(-1)?.endFrame, 250);
-  assert.equal(windows.at(-1)?.overlapBefore, 60);
+  assert.equal(windows.at(-1)?.overlapBefore, 40);
   assert.ok(windows.every((w) => w.frames === 100));
 });
 
@@ -124,3 +124,4 @@ test("an explicit invalid override fails instead of falling back", () => {
   const result = loadCapabilities({ FREEFIELD_PREP_CAPABILITIES: "{" });
   assert.equal(result.available, false);
 });
+

@@ -14,6 +14,8 @@ export function prepView() {
   const status = el("p", { class: "prep-status" });
   const sourceMeta = el("div", { class: "prep-source-meta" });
   const resultBox = el("div", { class: "prep-result" });
+  const exportBox = el("div", { class: "prep-export-results" });
+  const selected = new Set();
   const capsHost = el("div", { class: "prep-caps" });
   const fields = el("div", { class: "prep-fields" });
   const mode = { value: "enhance" };
@@ -44,6 +46,7 @@ export function prepView() {
   const modeButtons = ["enhance", "extend"].map((id) => {
     const b = el("button", { type: "button", "aria-pressed": String(mode.value === id), onclick: () => {
       mode.value = id;
+      selected.clear();
       modeButtons.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
       drawFields();
       drawPlan();
@@ -61,7 +64,7 @@ export function prepView() {
           el("span", { class: "prep-mode-ic" }, icon("scissors")),
           el("div", {},
             el("b", {}, "Export enhancement windows"),
-            el("p", {}, "Splits the source into the IC capability's windows. Window size, overlap, source coverage, fps, and audio rules come from the capability document.")))
+            el("p", {}, "Splits the source into enhancement windows for H3 Regenerate 2K IC. Window size, overlap, source coverage, fps, and audio rules come from the capability document. ", el("a", { class: "more", href: "#/app/h3-regenerate-2k-ic" }, "Open H3 Regenerate 2K IC", icon("chevR")))))
         : el("div", { class: "prep-mode-intro" },
           el("span", { class: "prep-mode-ic" }, icon("sliders")),
           el("div", {},
@@ -166,34 +169,102 @@ export function prepView() {
       const plan = await api("/api/prep/plan", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
       });
-      const title = mode.value === "enhance" ? `${plan.length} windows` : "Extension tail";
-      const rows = mode.value === "enhance"
-        ? plan.map((w) => el("div", { class: "prep-plan-row" },
-          el("span", { class: "prep-plan-index" }, String(w.index + 1).padStart(2, "0")),
-          el("b", {}, `${w.startFrame} → ${w.endFrame}`),
-          el("small", {}, `${w.frames} frames · overlap ${w.overlapBefore}/${w.overlapAfter}`)))
+      const isEnhance = mode.value === "enhance";
+      const title = isEnhance ? `${plan.length} windows` : "Extension tail";
+      const validIndexes = new Set(isEnhance ? plan.map((window) => window.index) : []);
+      for (const index of [...selected]) if (!validIndexes.has(index)) selected.delete(index);
+      const rowChecks = new Map();
+      let exportButton = null;
+      let selectAll = null;
+      const syncSelection = () => {
+        if (!isEnhance) {
+          if (exportButton) {
+            exportButton.disabled = false;
+            exportButton.replaceChildren(icon("download"), "Export tail");
+          }
+          return;
+        }
+        if (selectAll) {
+          selectAll.checked = plan.length > 0 && selected.size === plan.length;
+          selectAll.indeterminate = selected.size > 0 && selected.size < plan.length;
+        }
+        if (!exportButton) return;
+        const count = selected.size;
+        exportButton.disabled = count === 0 || Boolean(exportButton.dataset.busy);
+        exportButton.replaceChildren(icon("download"), count ? `Export selected (${count})` : "Select windows to export");
+      };
+      const appendExports = (out, label) => {
+        exportBox.append(el("div", { class: "prep-export-group" },
+          el("span", { class: "prep-export-label" }, label),
+          ...out.files.map((file) => el("a", { href: file.url, target: "_blank", rel: "noreferrer" }, icon("download"), file.name))));
+      };
+      const rows = isEnhance
+        ? plan.map((w) => {
+          const check = el("input", { type: "checkbox", class: "prep-check", checked: selected.has(w.index), "aria-label": `Select window ${w.index + 1}` });
+          check.addEventListener("change", () => {
+            if (check.checked) selected.add(w.index); else selected.delete(w.index);
+            syncSelection();
+          });
+          rowChecks.set(w.index, check);
+          return el("div", { class: "prep-plan-row" },
+            check,
+            el("span", { class: "prep-plan-index" }, String(w.index + 1).padStart(2, "0")),
+            el("b", {}, `${w.startFrame} → ${w.endFrame}`),
+            el("small", {}, `${w.frames} frames · overlap ${w.overlapBefore}/${w.overlapAfter}`));
+        })
         : [
           el("div", { class: "prep-plan-row" },
             el("span", { class: "prep-plan-index" }, "TAIL"),
             el("b", {}, `${plan.tail.startFrame} → ${plan.tail.endFrame}`),
             el("small", {}, `${plan.tail.frames} frames`)),
         ];
-      const exportButton = el("button", { class: "btn lime", type: "button", onclick: async () => {
-        status.textContent = "Exporting…";
-        status.className = "prep-status";
+      exportButton = el("button", { class: "btn lime", type: "button", onclick: async () => {
+        if (isEnhance && !selected.size) return;
+        exportBox.replaceChildren();
+        exportButton.dataset.busy = "1";
+        exportButton.disabled = true;
+        const indexes = isEnhance ? [...selected].sort((a, b) => a - b) : [null];
         try {
-          const out = await api("/api/prep/export", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-          resultBox.append(el("div", { class: "prep-exports" }, ...out.files.map((file) =>
-            el("a", { href: file.url, target: "_blank", rel: "noreferrer" }, icon("download"), file.name))));
-          status.textContent = "Export ready.";
+          for (let position = 0; position < indexes.length; position++) {
+            const index = indexes[position];
+            exportButton.replaceChildren(icon("download"), `Exporting ${position + 1} / ${indexes.length}`);
+            status.textContent = isEnhance
+              ? `Exporting window ${index + 1} (${position + 1} / ${indexes.length})…`
+              : "Exporting tail…";
+            status.className = "prep-status";
+            const payload = { ...body };
+            if (index !== null) payload.windowIndices = [index];
+            const out = await api("/api/prep/export", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+            appendExports(out, index === null ? "Tail" : `Window ${String(index + 1).padStart(2, "0")}`);
+            status.textContent = isEnhance
+              ? `Exported ${position + 1} / ${indexes.length}.`
+              : "Export ready.";
+          }
           toast("Export ready");
         } catch (error) {
           status.textContent = error.message;
           status.className = "prep-status err";
+        } finally {
+          delete exportButton.dataset.busy;
+          syncSelection();
         }
-      } }, icon("download"), "Export");
+      } }, icon("download"), isEnhance ? "Select windows to export" : "Export tail");
+      if (isEnhance) {
+        selectAll = el("input", { type: "checkbox", class: "prep-check", "aria-label": "Select all windows" });
+        selectAll.addEventListener("change", () => {
+          selected.clear();
+          if (selectAll.checked) for (const window of plan) selected.add(window.index);
+          for (const [index, check] of rowChecks) check.checked = selected.has(index);
+          syncSelection();
+        });
+      }
+      syncSelection();
       resultBox.append(
-        el("div", { class: "prep-plan-head" }, el("div", {}, el("span", { class: "proj-kicker" }, "PLAN"), el("h3", { class: "display" }, title)), exportButton),
+        el("div", { class: "prep-plan-head" },
+          el("div", {}, el("span", { class: "proj-kicker" }, "PLAN"), el("h3", { class: "display" }, title)),
+          el("div", { class: "prep-plan-controls" },
+            selectAll ? el("label", { class: "prep-select-all" }, selectAll, el("span", {}, "All")) : null,
+            exportButton)),
         el("div", { class: "prep-plan" }, ...rows));
       if (validate) status.textContent = "Plan valid.";
       status.className = "prep-status";
@@ -238,6 +309,7 @@ export function prepView() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
       source.value = body;
+      selected.clear();
       const probe = body.probe || {};
       sourceMeta.replaceChildren(
         metaRow("Duration", seconds(probe.duration)),
@@ -307,10 +379,14 @@ export function prepView() {
         el("div", { class: "prep-main-head" },
           el("div", {}, el("span", { class: "proj-kicker" }, "WORKBENCH"), el("h2", { class: "display" }, "Plan")),
           el("span", { class: "tag dark" }, "FRAME ACCURATE")),
-        resultBox)));
+        resultBox,
+        exportBox)));
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
+
+
 
 
 

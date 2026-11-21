@@ -141,8 +141,8 @@ export function planIcWindows(opts: {
     index,
     startFrame: start,
     sourceFrames: Math.min(windowFrames, totalFrames - start),
-    overlapBefore: index === 0 ? 0 : start - starts[index - 1],
-    overlapAfter: index === starts.length - 1 ? 0 : starts[index + 1] - start,
+    overlapBefore: index === 0 ? 0 : starts[index - 1] + windowFrames - start,
+    overlapAfter: index === starts.length - 1 ? 0 : start + windowFrames - starts[index + 1],
   }));
 }
 
@@ -156,3 +156,4 @@ export function configFingerprint(value: unknown): string {
   }
   return (h >>> 0).toString(16).padStart(8, "0");
 }
+

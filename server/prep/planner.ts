@@ -79,8 +79,8 @@ export function planEnhanceWindows(opts: {
     endFrame: start + windowFrames,
     frames: windowFrames,
     sourceFrames: Math.min(windowFrames, sourceFrames - start),
-    overlapBefore: index === 0 ? 0 : start - starts[index - 1],
-    overlapAfter: index === starts.length - 1 ? 0 : starts[index + 1] - start,
+    overlapBefore: index === 0 ? 0 : starts[index - 1] + windowFrames - start,
+    overlapAfter: index === starts.length - 1 ? 0 : start + windowFrames - starts[index + 1],
   }));
 }
 
@@ -163,3 +163,4 @@ export function planExtensionSegments(opts: {
   }
   return segments;
 }
+

@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { receive } from "../projects/assets.ts";
+import { configFingerprint } from "../projects/planner.ts";
 import { loadCapabilities, validateCapabilities, type PrepCapabilities } from "./capabilities.ts";
 import {
   planEnhanceWindows,
@@ -249,7 +250,20 @@ export class PrepService {
     const files: PrepExportFile[] = [];
     if (mode === "enhance") {
       if (!capability.enhance) throw new PrepInputError("enhance capability is unavailable");
-      const windows = planEnhanceWindows({ sourceFrames: totalFrames(source.probe), capability: capability.enhance });
+      const planned = planEnhanceWindows({ sourceFrames: totalFrames(source.probe), capability: capability.enhance });
+      const requested = body.windowIndices ?? (body.windowIndex !== undefined ? [body.windowIndex] : null);
+      let windows = planned;
+      if (requested !== null) {
+        if (!Array.isArray(requested) || requested.length === 0) throw new PrepInputError("windowIndices must select at least one window");
+        const indexes = [...new Set(requested.map(Number))];
+        if (indexes.some((index) => !Number.isInteger(index))) throw new PrepInputError("windowIndices must be integers");
+        if (indexes.some((index) => !planned.some((window) => window.index === index))) {
+          throw new PrepInputError("windowIndices contains a window outside the current plan");
+        }
+        const selected = new Set(indexes);
+        windows = planned.filter((window) => selected.has(window.index));
+        manifest.windowIndices = windows.map((window) => window.index);
+      }
       for (const window of windows) {
         const name = `window-${String(window.index).padStart(4, "0")}${extensionFor(capability.export.container)}`;
         const output = join(folder, name);
@@ -257,6 +271,7 @@ export class PrepService {
         const probe = await probeSource(output);
         files.push({ name, url: `/api/prep/files/${id}/${name}`, bytes: probe.bytes });
       }
+      manifest.planFingerprint = configFingerprint({ sourceId: source.id, mode, windows: planned });
       manifest.windows = windows;
     } else if (mode === "extend") {
       if (!capability.extend) throw new PrepInputError("extend capability is unavailable");
@@ -267,6 +282,7 @@ export class PrepService {
       const probe = await probeSource(output);
       files.push({ name, url: `/api/prep/files/${id}/${name}`, bytes: probe.bytes });
       manifest.tail = tail;
+      manifest.planFingerprint = configFingerprint({ sourceId: source.id, mode, tail });
     } else {
       throw new PrepInputError("mode must be enhance or extend");
     }
@@ -292,6 +308,7 @@ export class PrepService {
 }
 
 type PrepCapabilitiesResult = ReturnType<typeof loadCapabilities>;
+
 
 
 
