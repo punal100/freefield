@@ -845,8 +845,21 @@ function sideField(app, inp, f, ui, onChange = null) {
   }
   const box = el("input", { type: inp.type === "number" ? "number" : "text", min: inp.min, max: inp.max, step: inp.step, value: f.values[inp.id] ?? "",
     placeholder: inp.default !== undefined ? String(inp.default) : "", "aria-label": inp.label });
-  box.addEventListener("input", () => set(inp.type === "number" ? (box.value === "" ? "" : Number(box.value)) : box.value));
-  return el("label", { class: "field" }, el("span", { class: "lbl" }, inp.label, inp.required ? null : el("small", {}, t("ws.optional"))), box, help);
+  const frameRate = Number(inp.frameRate);
+  const frameSeconds = Number.isFinite(frameRate) && frameRate > 0
+    ? el("small", { class: "frame-seconds" })
+    : null;
+  const paintSeconds = () => {
+    if (!frameSeconds) return;
+    const frames = Number(box.value);
+    frameSeconds.textContent = Number.isFinite(frames) && frames > 0 ? `${(frames / frameRate).toFixed(3)} s` : "";
+  };
+  box.addEventListener("input", () => {
+    set(inp.type === "number" ? (box.value === "" ? "" : Number(box.value)) : box.value);
+    paintSeconds();
+  });
+  paintSeconds();
+  return el("label", { class: "field" }, el("span", { class: "lbl" }, inp.label, inp.required ? null : el("small", {}, t("ws.optional"))), box, frameSeconds, help);
 }
 
 const isAdvanced = (inp) => inp.type === "seed" || /negative/.test(inp.id);

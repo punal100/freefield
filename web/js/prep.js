@@ -30,8 +30,26 @@ export function prepView() {
       el("small", {}, "Drop or choose a source · metadata is read server-side")));
 
   const context = el("input", { type: "number", placeholder: "frames" });
+  const contextSeconds = el("small", { class: "frame-seconds" });
   const visible = el("input", { type: "number", placeholder: "frames (optional)" });
   const target = el("input", { type: "number", placeholder: "frames (optional)" });
+  const frameSummary = el("p", { class: "prep-frame-summary" });
+  const syncFrameSeconds = () => {
+    const fps = Number(source.value?.probe?.fps ?? prep.value?.source?.fps);
+    const contextFrames = Number(context.value);
+    contextSeconds.textContent = Number.isFinite(fps) && fps > 0 && Number.isFinite(contextFrames) && contextFrames > 0
+      ? `${(contextFrames / fps).toFixed(3)} s`
+      : "";
+    const parts = [["context", context], ["visible", visible], ["target", target]]
+      .map(([name, input]) => {
+        const frames = Number(input.value);
+        return Number.isFinite(frames) && frames > 0
+          ? `${name} ${frames}f${Number.isFinite(fps) && fps > 0 ? ` = ${(frames / fps).toFixed(3)}s` : ""}`
+          : null;
+      }).filter(Boolean);
+    frameSummary.textContent = Number.isFinite(fps) && fps > 0 ? `At ${fps} fps${parts.length ? ` · ${parts.join(" · ")}` : ""}` : "";
+  };
+  [context, visible, target].forEach((input) => input.addEventListener("input", syncFrameSeconds));
   const planButton = el("button", { class: "btn lime prep-plan-btn", type: "button", onclick: () => drawPlan(true) },
     icon("check"), "Validate plan");
   const modeButtons = ["enhance", "extend"].map((id) => {
@@ -62,7 +80,7 @@ export function prepView() {
             el("p", {}, "Exports only the final tail for H3 Extend. Prompt, references, and generation settings stay in the H3 Extend app. ", el("a", { class: "more", href: "#/app/h3-extend-sglang" }, "Open H3 Extend", icon("chevR"))))),
       mode.value === "extend"
         ? el("label", { class: "field" }, el("span", { class: "lbl" }, "Motion context", el("small", {}, "required")),
-          context,
+          context, contextSeconds,
           el("p", { class: "help" }, extendRange))
         : null,
       mode.value === "extend"
@@ -70,6 +88,7 @@ export function prepView() {
           el("label", { class: "field" }, el("span", { class: "lbl" }, "Visible", el("small", {}, "plan only")), visible),
           el("label", { class: "field" }, el("span", { class: "lbl" }, "Target", el("small", {}, "plan only")), target))
         : null,
+      mode.value === "extend" ? frameSummary : null,
       mode.value === "extend"
         ? el("p", { class: "prep-help" }, "Visible and target only preview the chain length. Export writes the tail clip; it does not generate segments.")
         : null,
@@ -252,6 +271,8 @@ export function prepView() {
       sourceButton.querySelector("b").textContent = file.name;
       sourceButton.querySelector("small").textContent = "Replace source";
       status.textContent = "Source ready.";
+      syncFrameSeconds();
+      drawFields();
       await drawPlan();
     } catch (error) {
       status.textContent = error.message;
@@ -310,6 +331,12 @@ export function prepView() {
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
+
+
+
+
+
 
 
 

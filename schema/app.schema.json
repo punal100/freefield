@@ -144,6 +144,7 @@
         "min": { "type": "number" },
         "max": { "type": "number" },
         "step": { "type": "number" },
+        "frameRate": { "type": "number", "exclusiveMinimum": 0, "description": "Number/slider only: value is a frame count; the UI shows the equivalent seconds at this frame rate." },
         "options": { "type": "array", "items": { "$ref": "#/$defs/option" } },
         "gallery": {
           "type": "boolean",

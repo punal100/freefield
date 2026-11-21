@@ -85,14 +85,14 @@
     },
     {
       "id": "context",
-      "type": "select",
+      "type": "number",
       "label": "Motion context",
+      "min": 48,
+      "max": 360,
+      "step": 1,
       "default": 63,
-      "help": "Frames cut from the end of the source and added as Video 1. 63 frames keeps the tail above SGLang's 2 s reference-video minimum.",
-      "options": [
-        { "value": 48, "label": "48 frames (2.0 s)" },
-        { "value": 63, "label": "63 frames (2.6 s), recommended" }
-      ]
+      "frameRate": 24,
+      "help": "Frames cut from the end of the source and added as Video 1. Enter any frame count in the allowed range; the equivalent seconds are shown live."
     },
     {
       "id": "steps",
