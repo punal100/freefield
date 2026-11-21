@@ -10,6 +10,7 @@ import { exampleItem, thumb, hoverPlay, fullMedia, playWhenVisible, optionTile, 
 import { flags, flagButton } from "./flags.js";
 import { feed, feedView, hooks } from "./feed.js";
 import { openPainter, maskPreview } from "./paint.js";
+import { h3Caps, h3CapsLoaded, h3CapsSync, h3CapacityText, h3DurationMax } from "./h3caps.js";
 
 // ------------------------------------------------------------------ form state (per app, kept while the page is open)
 const forms = new Map();
@@ -955,6 +956,7 @@ function storeSideWidth(width) {
 
 function sidebarPanel(app, rerenderSide) {
   const f = formFor(app);
+  const caps = h3CapsSync();
   const ui = { refs: {} };
   const tab = videoTabOf(app.id);
   const tabs = tab ? el("div", { class: "side-tabs", role: "tablist" }, ...VIDEO_TABS.map((vt) => el("button", { type: "button", role: "tab",
@@ -978,10 +980,15 @@ function sidebarPanel(app, rerenderSide) {
   card.append(change);
 
   if (app.id === "h3-regenerate-2k-ic" && f.values.resolution === "4k") f.values.vae = "standard";
-  const extendDuration = app.id === "h3-extend-sglang" ? app.inputs.find((inp) => inp.id === "duration") : null;
+  const durationInput = app.backend === "sglang" ? app.inputs.find((inp) => inp.id === "duration") : null;
+  if (durationInput) {
+    durationInput.max = Math.min(15, Number(durationInput.max) || 15, Number(caps.max_seconds) || 15);
+    f.values.duration = Math.min(Number(f.values.duration) || 5, durationInput.max);
+  }
+  const extendDuration = app.id === "h3-extend-sglang" ? durationInput : null;
   const setExtendDurationMax = (contextFrames) => {
     if (!extendDuration) return;
-    const max = Math.max(2, Math.floor(15 - Number(contextFrames) / 24));
+    const max = Math.max(2, h3DurationMax(caps, contextFrames));
     extendDuration.max = max;
     f.values.duration = Math.min(max, Math.max(Number(extendDuration.min || 2), Number(f.values.duration) || 5));
   };
@@ -1013,6 +1020,8 @@ function sidebarPanel(app, rerenderSide) {
   }
   if (app.presets?.length) adv.unshift(presetField(app, f));
   if (app.inputs.some((i) => i.type === "video" || i.type === "audio")) main.push(refBudget(app));
+  if (app.backend === "sglang") main.push(el("p", { class: "help h3-capacity" }, h3CapacityText(caps)));
+  if (app.backend === "sglang" && !h3CapsLoaded()) h3Caps().then(() => rerenderSide());
   const advanced = adv.length ? el("details", { class: "adv" }, el("summary", {}, t("ws.advanced"), icon("chevD", "i-chev")), el("div", { class: "in" }, ...adv)) : null;
 
   const promptOffer = app.id === "h3-regenerate-2k-ic" && pendingICPrompt && !String(f.values.prompt ?? "").trim()
@@ -1270,6 +1279,9 @@ export function workspaceView(appId) {
 /** For the viewer's "Recreate" and the feed's "Try again". */
 export function setTab(tab) { wsTab = tab; }
 export { submit as submitApp, hoverPlay, playWhenVisible, sideResizer };
+
+
+
 
 
 

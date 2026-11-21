@@ -503,6 +503,14 @@ export class SglangClient {
     return await res.json() as { state: string; error?: string | null };
   }
 
+  async capabilities(): Promise<Record<string, unknown>> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/model/status`, { headers: this.headers() });
+    if (!res.ok) throw new SglangInputError(await this.failure(res));
+    const body = await res.json() as { admission?: Record<string, unknown>; gpu_plan?: Record<string, unknown> };
+    if (!body.admission) throw new SglangInputError("H3 supervisor does not report admission capabilities");
+    return { ...body.admission, gpu_plan: body.gpu_plan ?? null };
+  }
+
   async listJobs(): Promise<JobData[]> {
     const res = await this.doFetch(`${this.baseUrl}/v1/videos`, { headers: this.headers() });
     if (!res.ok) throw new SglangInputError(await this.failure(res));

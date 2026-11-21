@@ -3,6 +3,7 @@
 // The browser never talks to SGLang or the IC sidecar directly.
 import { api, el, icon, store, toast } from "./util.js";
 import { sideResizer } from "./workspace.js";
+import { h3Caps, h3CapsLoaded, h3CapsSync, h3CapacityText, h3DurationMax } from "./h3caps.js";
 
 const ACTIVE = new Set(["planning", "running", "paused"]);
 const TARGETS = [
@@ -205,7 +206,8 @@ function manualProjectPanel(p, actions) {
   const extendSource = el("select", {}, ...options().map((item) => el("option", { value: item.id }, item.label)));
   extendSource.value = options().at(-1)?.id || "";
   const prompt = el("textarea", { rows: "4" }, p.prompt || "Continue the motion, camera and scene.");
-  const seconds = el("input", { type: "number", min: "4", max: "12", step: "1", value: "5" });
+  const caps = h3CapsSync();
+  const seconds = el("input", { type: "number", min: "4", max: String(h3DurationMax(caps, 63)), step: "1", value: "5" });
   const context = el("select", {}, el("option", { value: "63" }, "63 frames (2.6 s)"), el("option", { value: "48" }, "48 frames (2 s)"));
   const steps = el("input", { type: "number", min: "1", max: "50", step: "1", value: String(p.config?.steps ?? 8) });
   const seed = el("input", { type: "number", min: "0", max: "2147483647", step: "1", value: String(p.config?.seedBase ?? 42) });
@@ -426,7 +428,8 @@ export function projectsView() {
   const story = el("textarea", { placeholder: "Persistent continuity bible: characters, wardrobe, locations, story state, camera rules, audio/dialogue rules.", rows: "5" });
   const segmentPrompts = el("textarea", { placeholder: "Optional per-segment prompts, one line per extension segment. Line 1 is Segment 1.", rows: "5" });
   const seed = el("input", { type: "number", value: "42", min: "0", max: "2147483647", step: "1" });
-  const visible = el("input", { type: "number", value: "5", min: "2", max: "12", step: "1" });
+  const caps = h3CapsSync();
+  const visible = el("input", { type: "number", value: "5", min: "2", max: String(Math.min(12, h3DurationMax(caps, 63))), step: "1" });
   const steps = el("input", { type: "number", value: "8", min: "1", max: "50", step: "1" });
   const target = el("input", { type: "number", value: "120", min: "10", max: "7200", step: "1" });
   const modeButtons = new Map();
@@ -510,6 +513,7 @@ export function projectsView() {
     }
   } },
     el("div", { class: "proj-form-head" }, el("span", { class: "proj-step" }, "01"), el("div", {}, el("h2", { class: "display" }, "Project blueprint"), el("p", {}, "Set the length, continuity context and the two engines that build the final film."))),
+    el("p", { class: "help h3-capacity", "data-h3-capacity": "" }, h3CapacityText(caps)),
     el("div", { class: "proj-form-section proj-auto-only" }, el("span", { class: "lbl" }, "Pipeline"), kindSeg),
     el("div", { class: "proj-form-section" }, el("span", { class: "lbl" }, "Mode"), modeSeg, el("p", { class: "proj-mode-note" }, "Auto builds the whole project. Manual creates a draft; every extension, IC range and assembly is yours to run.")),
     el("div", { class: "proj-form-section proj-auto-only" }, el("span", { class: "lbl" }, "Target length"), targetPills,
@@ -638,6 +642,11 @@ export function projectsView() {
     dispose: () => { disposed = true; clearInterval(timer); source.input.onchange = null; for (const f of Object.values(refs)) f.input.onchange = null; },
   };
 }
+
+
+
+
+
 
 
 

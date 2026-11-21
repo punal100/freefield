@@ -362,6 +362,19 @@ const server = createServer(async (req, res) => {
       }
     }
     if (parts[0] === "api") {
+      if (req.method === "GET" && parts[1] === "h3" && parts[2] === "capabilities" && parts.length === 3) {
+        const official = {
+          profile: null, max_seconds: 15, max_refs: 12, max_images: 9, max_videos: 3, max_audios: 3,
+          official_max_seconds: 15, reference_clip_seconds: [2, 15],
+          reference_total_seconds: { video: 15, audio: 15 }, source: "official", available: false,
+        };
+        try {
+          const caps = await getRunner().sglang?.capabilities();
+          return send(res, 200, caps ? { ...official, ...caps, source: "profile", available: true } : official);
+        } catch (error) {
+          return send(res, 200, { ...official, error: (error as Error).message });
+        }
+      }
       if (req.method === "GET" && parts[1] === "work" && parts.length === 2) {
         return send(res, 200, await workView());
       }
