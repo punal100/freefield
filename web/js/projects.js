@@ -60,6 +60,18 @@ async function upload(path, file) {
   return body;
 }
 
+function mediaSeconds(file, kind) {
+  return new Promise((resolve) => {
+    const node = document.createElement(kind === "audio" ? "audio" : "video");
+    const url = URL.createObjectURL(file);
+    const done = (value) => { URL.revokeObjectURL(url); resolve(Number.isFinite(value) ? value : 0); };
+    node.preload = "metadata";
+    node.onloadedmetadata = () => done(node.duration);
+    node.onerror = () => done(0);
+    node.src = url;
+  });
+}
+
 function fileDrop({ label, hint, accept, multiple = false, iconName }) {
   const input = el("input", { type: "file", accept, multiple: multiple ? "" : undefined, hidden: "" });
   const text = el("b", {}, label);
@@ -389,6 +401,27 @@ export function projectsView() {
     video: fileDrop({ label: "Videos", hint: "up to 2 extra · 2–15 s", accept: "video/mp4,video/quicktime,video/webm", multiple: true, iconName: "video" }),
     audio: fileDrop({ label: "Audio", hint: "up to 3 · 2–15 s", accept: "audio/wav,audio/mpeg,audio/mp4", multiple: true, iconName: "audio" }),
   };
+  const refBudget = el("div", { class: "ref-budget", style: { padding: "8px 10px", border: "1px solid var(--line)", borderRadius: "8px", fontSize: "12px" } });
+  const updateRefBudget = async () => {
+    const videoFiles = [...(refs.video.input.files || [])];
+    const audioFiles = [...(refs.audio.input.files || [])];
+    const images = (refs.image.input.files || []).length;
+    let video = 63 / 24;
+    for (const file of videoFiles) video += await mediaSeconds(file, "video");
+    let audio = 0;
+    for (const file of audioFiles) audio += await mediaSeconds(file, "audio");
+    const files = images + videoFiles.length + audioFiles.length + 1;
+    const problems = [];
+    if (video > 15.1) problems.push(`video ${video.toFixed(1)}/15 s`);
+    if (audio > 15.1) problems.push(`audio ${audio.toFixed(1)}/15 s`);
+    if (files > 12) problems.push(`${files}/12 files`);
+
+    refBudget.textContent = `References — Video ${video.toFixed(1)}/15 s (incl. 2.6 s tail) · Audio ${audio.toFixed(1)}/15 s · Files ${files}/12`;
+    if (problems.length) refBudget.textContent += ` — WARNING: ${problems.join(" · ")}`;
+    refBudget.style.color = problems.length ? "var(--warn, #e5a50a)" : "";
+  };
+  for (const field of Object.values(refs)) field.input.addEventListener("change", updateRefBudget);
+  updateRefBudget();
   const prompt = el("textarea", { placeholder: "Base direction for every extension segment. Use <Picture 1>, <Video 1>, <Audio 1>.", rows: "4" });
   const story = el("textarea", { placeholder: "Persistent continuity bible: characters, wardrobe, locations, story state, camera rules, audio/dialogue rules.", rows: "5" });
   const segmentPrompts = el("textarea", { placeholder: "Optional per-segment prompts, one line per extension segment. Line 1 is Segment 1.", rows: "5" });
@@ -493,7 +526,8 @@ export function projectsView() {
       el("label", { class: "field" }, el("span", { class: "lbl" }, "Steps"), steps),
       el("label", { class: "field" }, el("span", { class: "lbl" }, "IC resolution"), resolution),
       el("label", { class: "field" }, el("span", { class: "lbl" }, "IC sampler"), sampler)),
-    el("div", { class: "proj-reference-grid" }, ...Object.values(refs).map((f) => f.drop)));
+    el("div", { class: "proj-reference-grid" }, ...Object.values(refs).map((f) => f.drop)),
+    refBudget);
   const syncMode = () => {
     form.classList.toggle("manual-mode", projectMode === "manual");
     submit.textContent = projectMode === "manual" ? "Create manual project" : "Create project";
@@ -604,6 +638,9 @@ export function projectsView() {
     dispose: () => { disposed = true; clearInterval(timer); source.input.onchange = null; for (const f of Object.values(refs)) f.input.onchange = null; },
   };
 }
+
+
+
 
 
 

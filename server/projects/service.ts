@@ -288,7 +288,7 @@ export class ProjectService {
     const sourceAsset = String(input.sourceAsset ?? project.source_asset ?? "");
     const source = this.db.asset(sourceAsset);
     if (!source) throw new MediaError("manual source asset is missing");
-    const seconds = Math.ceil(Math.max(4, Math.min(12, Number(input.seconds ?? config.visibleSeconds ?? 5))));
+    const seconds = Math.ceil(Math.max(4, Math.min(13, Number(input.seconds ?? config.visibleSeconds ?? 5))));
     const contextFrames = Math.max(48, Math.min(303, Math.round(Number(input.contextFrames ?? config.contextFrames ?? 63))));
     const visibleFrames = seconds * 24;
     const requestFrames = visibleFrames + contextFrames;
@@ -906,6 +906,8 @@ export class ProjectService {
     return { id: asset.id, url: `/api/projects/assets/${asset.id}`, width: asset.width, height: asset.height, duration: asset.duration, frames: asset.frames };
   }
 }
+
+
 
 
 
