@@ -81,5 +81,5 @@
     "Open-H3-Regenerate-2K-IC (MiniMax H3 Community License)",
     "MiniMax H3 (MiniMax H3 Community License)"
   ],
-  "notes": "Draft: the Open-H3-Regenerate-2K-IC sidecar is baked into the IC image but has not been validated on a 1080p/2K GPU run. SGLang does not expose the exact latent upscaler/sigma grid, so this app uses the sidecar, not a resolution option."
+  "notes": "Draft: the Open-H3-Regenerate-2K-IC sidecar is baked into the IC image but has not been validated on a 1080p/2K GPU run. SGLang does not expose the exact latent upscaler/sigma grid, so this app uses the sidecar, not a resolution option. Quality settings are never automatically reduced: unsupported settings fail with a clear backend error and must be changed manually in this form. Full quality keeps the original BF16 transformer and Qwen, FP32 VAE with 256/64 tiling, the official 17-frame temporal behavior, and the unmerged IC LoRA."
 }
