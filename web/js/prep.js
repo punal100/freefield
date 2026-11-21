@@ -15,6 +15,21 @@ export function prepView() {
   const sourceMeta = el("div", { class: "prep-source-meta" });
   const resultBox = el("div", { class: "prep-result" });
   const exportBox = el("div", { class: "prep-export-results" });
+  const exportCount = el("b", {}, "0 clips");
+  const exportToggle = el("button", { class: "btn ghost small", type: "button", onclick: () => {
+    const collapsed = exportTray.classList.toggle("collapsed");
+    exportToggle.textContent = collapsed ? "Show" : "Hide";
+  } }, "Hide");
+  const exportTray = el("section", { class: "prep-export-tray", hidden: true },
+    el("div", { class: "prep-export-tray-head" },
+      el("div", { class: "prep-export-tray-title" }, el("span", { class: "proj-kicker" }, "EXPORTS"), exportCount),
+      exportToggle),
+    exportBox);
+  const refreshExportTray = () => {
+    const count = exportBox.querySelectorAll("a").length;
+    exportCount.textContent = `${count} ${count === 1 ? "clip" : "clips"}`;
+    exportTray.hidden = count === 0;
+  };
   const selected = new Set();
   const capsHost = el("div", { class: "prep-caps" });
   const fields = el("div", { class: "prep-fields" });
@@ -193,10 +208,15 @@ export function prepView() {
         exportButton.disabled = count === 0 || Boolean(exportButton.dataset.busy);
         exportButton.replaceChildren(icon("download"), count ? `Export selected (${count})` : "Select windows to export");
       };
-      const appendExports = (out, label) => {
-        exportBox.append(el("div", { class: "prep-export-group" },
-          el("span", { class: "prep-export-label" }, label),
-          ...out.files.map((file) => el("a", { href: file.url, target: "_blank", rel: "noreferrer" }, icon("download"), file.name))));
+      const appendExports = (out, label, detail) => {
+        for (const file of out.files) {
+          exportBox.append(el("a", { class: "prep-export-item", href: file.url, target: "_blank", rel: "noreferrer", title: file.name },
+            el("span", { class: "prep-export-copy" },
+              el("span", { class: "prep-export-top" }, el("b", {}, label), el("small", {}, detail)),
+              el("span", { class: "prep-export-name" }, file.name)),
+            icon("download")));
+        }
+        refreshExportTray();
       };
       const rows = isEnhance
         ? plan.map((w) => {
@@ -235,7 +255,8 @@ export function prepView() {
             const payload = { ...body };
             if (index !== null) payload.windowIndices = [index];
             const out = await api("/api/prep/export", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
-            appendExports(out, index === null ? "Tail" : `Window ${String(index + 1).padStart(2, "0")}`);
+            const itemPlan = index === null ? plan.tail : plan.find((window) => window.index === index);
+            appendExports(out, index === null ? "Tail" : `Window ${String(index + 1).padStart(2, "0")}`, `${itemPlan.startFrame} → ${itemPlan.endFrame} frames`);
             status.textContent = isEnhance
               ? `Exported ${position + 1} / ${indexes.length}.`
               : "Export ready.";
@@ -379,11 +400,17 @@ export function prepView() {
         el("div", { class: "prep-main-head" },
           el("div", {}, el("span", { class: "proj-kicker" }, "WORKBENCH"), el("h2", { class: "display" }, "Plan")),
           el("span", { class: "tag dark" }, "FRAME ACCURATE")),
-        resultBox,
-        exportBox)));
+        exportTray,
+        resultBox)));
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
+
+
+
+
+
 
 
 

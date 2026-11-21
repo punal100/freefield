@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createReadStream, mkdirSync, rmSync, statSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { join, extname } from "node:path";
+import { basename, join, extname } from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
@@ -137,6 +137,19 @@ function extensionFor(container: string): string {
   return clean.includes("/") ? ".bin" : `.${clean}`;
 }
 
+function sourceStem(name: string): string {
+  const stem = basename(name, extname(name)).normalize("NFKD")
+    .replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+  return stem || "source";
+}
+
+function rangeStem(sourceName: string, kind: string, index: number | null, range: FrameRange): string {
+  const label = index === null ? "tail" : `w${String(index + 1).padStart(3, "0")}`;
+  const start = String(range.startFrame).padStart(6, "0");
+  const end = String(range.endFrame).padStart(6, "0");
+  return `${sourceStem(sourceName)}-${kind}-${label}-f${start}-${end}`;
+}
+
 async function extractRange(
   input: string,
   output: string,
@@ -265,7 +278,7 @@ export class PrepService {
         manifest.windowIndices = windows.map((window) => window.index);
       }
       for (const window of windows) {
-        const name = `window-${String(window.index).padStart(4, "0")}${extensionFor(capability.export.container)}`;
+        const name = `${rangeStem(source.name, "enhance", window.index, window)}${extensionFor(capability.export.container)}`;
         const output = join(folder, name);
         await extractRange(source.path, output, window, capability, capability.source.audio !== "ignored");
         const probe = await probeSource(output);
@@ -276,7 +289,7 @@ export class PrepService {
     } else if (mode === "extend") {
       if (!capability.extend) throw new PrepInputError("extend capability is unavailable");
       const tail = planExtensionTail({ sourceFrames: totalFrames(source.probe), contextFrames: Number(body.contextFrames), capability: capability.extend });
-      const name = `tail${extensionFor(capability.export.container)}`;
+      const name = `${rangeStem(source.name, "extend", null, tail)}${extensionFor(capability.export.container)}`;
       const output = join(folder, name);
       await extractRange(source.path, output, tail, capability, capability.source.audio !== "ignored");
       const probe = await probeSource(output);
@@ -308,6 +321,7 @@ export class PrepService {
 }
 
 type PrepCapabilitiesResult = ReturnType<typeof loadCapabilities>;
+
 
 
 

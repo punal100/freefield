@@ -1128,3 +1128,21 @@ dl.vals dd { margin: 0; overflow-wrap: anywhere; }
 .prep-export-label { min-width: 74px; color: var(--dim); font: 700 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .06em; }
 .prep-export-group a { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 8px; background: var(--panel-2); color: var(--accent); font-size: 12px; font-weight: 600; }
 
+
+.prep-export-tray { position: sticky; top: 8px; z-index: 20; display: grid; gap: 9px; padding: 12px; border: 1px solid #2b2b31; border-radius: 13px; background: rgba(15, 15, 17, .96); backdrop-filter: blur(14px); box-shadow: 0 12px 32px rgba(0, 0, 0, .38); }
+.prep-export-tray[hidden] { display: none; }
+.prep-export-tray.collapsed .prep-export-results { display: none; }
+.prep-export-tray-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.prep-export-tray-title { display: flex; align-items: center; gap: 9px; }
+.prep-export-tray-title b { color: var(--accent); font-size: 11.5px; font-weight: 650; }
+.prep-export-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(390px, 1fr)); gap: 7px; max-height: 230px; overflow: auto; padding-right: 2px; }
+.prep-export-item { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px; border: 1px solid #29292f; border-radius: 9px; background: #17171a; color: var(--ink); }
+.prep-export-item:hover { border-color: var(--accent); background: var(--accent-soft); }
+.prep-export-item > svg { width: 15px; height: 15px; flex: none; color: var(--accent); }
+.prep-export-copy { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.prep-export-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.prep-export-top b { font-size: 12px; }
+.prep-export-top small { color: var(--dim); font: 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.prep-export-name { color: var(--faint); font: 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+
+
