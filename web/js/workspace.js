@@ -77,10 +77,13 @@ function mediaSeconds(file, type) {
 }
 
 async function validateMediaFiles(app) {
+  const form = formFor(app);
   const totals = { video: 0, audio: 0 };
+  let files = 0;
   for (const inp of app.inputs.filter((i) => isMedia(i.type))) {
-    const value = formFor(app).files[inp.id];
+    const value = form.files[inp.id];
     const items = Array.isArray(value) ? value : value ? [value] : [];
+    files += items.length;
     for (const { file } of items) {
       if (!fileMatches(inp.type, file)) {
         throw new Error(`${inp.label}: ${file.name} — unsupported ${inp.type} format`);
@@ -97,25 +100,43 @@ async function validateMediaFiles(app) {
       totals[inp.type] += seconds;
     }
   }
+  const tail = app.id === "h3-extend-sglang" ? Number(form.values.context || 0) / 24 : 0;
+  totals.video += tail;
+  const mixed = files + (tail ? 1 : 0);
+  if (mixed > 12) throw new Error(`H3 accepts at most 12 reference files including the motion tail; remove ${mixed - 12}`);
   for (const [kind, total] of Object.entries(totals)) {
-    if (total > 15.1) throw new Error(`Reference ${kind}: ${total.toFixed(1)} s total; the maximum is 15 s`);
+    if (total > 15.1) throw new Error(`Reference ${kind}: ${total.toFixed(1)} s total; the maximum is 15 s${kind === "video" && tail ? " including the motion tail" : ""}`);
   }
 }
 
 function refBudget(app) {
   const box = el("div", { class: "ref-budget", style: { margin: "8px 0", padding: "8px 10px", border: "1px solid var(--line)", borderRadius: "8px", fontSize: "12px" } });
   const update = async () => {
+    const form = formFor(app);
     const totals = { video: 0, audio: 0 };
-    for (const inp of app.inputs.filter((i) => i.type === "video" || i.type === "audio")) {
-      const value = formFor(app).files[inp.id];
+    const counts = { image: 0, video: 0, audio: 0 };
+    let files = 0;
+    for (const inp of app.inputs.filter((i) => isMedia(i.type))) {
+      const value = form.files[inp.id];
       const items = Array.isArray(value) ? value : value ? [value] : [];
+      counts[inp.type] += items.length;
+      files += items.length;
+      if (inp.type !== "video" && inp.type !== "audio") continue;
       for (const { file } of items) {
         try { totals[inp.type] += await mediaSeconds(file, inp.type); } catch { /* unreadable files are reported on submit */ }
       }
     }
-    const video = totals.video.toFixed(1), audio = totals.audio.toFixed(1);
-    box.textContent = `Reference budgets — Video ${video}/15 s · Audio ${audio}/15 s`;
-    box.style.color = totals.video > 15.1 || totals.audio > 15.1 ? "var(--warn, #e5a50a)" : "";
+    const tail = app.id === "h3-extend-sglang" ? Number(form.values.context || 0) / 24 : 0;
+    const video = totals.video + tail;
+    const mixed = files + (tail ? 1 : 0);
+    const problems = [];
+    if (video > 15.1) problems.push(`video ${video.toFixed(1)}/15 s`);
+    if (totals.audio > 15.1) problems.push(`audio ${totals.audio.toFixed(1)}/15 s`);
+    if (mixed > 12) problems.push(`${mixed}/12 files`);
+    if (counts.audio > 0 && counts.image === 0 && counts.video === 0 && !tail) problems.push("audio needs an image or video reference");
+    box.textContent = `Reference budgets — Video ${video.toFixed(1)}/15 s${tail ? ` (incl. ${tail.toFixed(1)} s tail)` : ""} · Audio ${totals.audio.toFixed(1)}/15 s · Files ${mixed}/12`;
+    if (problems.length) box.textContent += ` — WARNING: ${problems.join(" · ")}`;
+    box.style.color = problems.length ? "var(--warn, #e5a50a)" : "";
   };
   update();
   return box;
@@ -676,7 +697,7 @@ function multiDropzone(app, inp, rerender) {
         : el("audio", { src: x.url, controls: true, preload: "metadata" });
     if (inp.type === "video") media.muted = true;
     const warn = el("small", { class: "ref-note" });
-    if (inp.type === "video" && inp.limits?.seconds) {
+    if ((inp.type === "video" || inp.type === "audio") && inp.limits?.seconds) {
       media.addEventListener("loadedmetadata", () => {
         const [a, b] = inp.limits.seconds;
         if (media.duration < a - 0.1 || media.duration > b + 0.1) {
@@ -750,7 +771,7 @@ function dropzone(app, inp, rerender) {
         : el("audio", { src: x.url, controls: true, preload: "metadata" });
     if (inp.type === "video") media.muted = true;
     const warn = el("span", { class: "fname" }, x.file.name);
-    if (inp.type === "video" && inp.limits?.seconds) {
+    if ((inp.type === "video" || inp.type === "audio") && inp.limits?.seconds) {
       media.addEventListener("loadedmetadata", () => {
         const [a, b] = inp.limits.seconds;
         if (media.duration < a - 0.1 || media.duration > b + 0.1) { warn.textContent = `${x.file.name} · ${media.duration.toFixed(1)} s (${a}–${b} s)`; warn.style.color = "var(--warn)"; }
@@ -957,7 +978,20 @@ function sidebarPanel(app, rerenderSide) {
   card.append(change);
 
   if (app.id === "h3-regenerate-2k-ic" && f.values.resolution === "4k") f.values.vae = "standard";
+  const extendDuration = app.id === "h3-extend-sglang" ? app.inputs.find((inp) => inp.id === "duration") : null;
+  const setExtendDurationMax = (contextFrames) => {
+    if (!extendDuration) return;
+    const max = Number(contextFrames) >= 63 ? 7 : 8;
+    extendDuration.max = max;
+    f.values.duration = Math.min(max, Math.max(Number(extendDuration.min || 2), Number(f.values.duration) || 5));
+  };
+  if (extendDuration) setExtendDurationMax(f.values.context ?? 63);
   const onValue = (inp, value) => {
+    if (app.id === "h3-extend-sglang") {
+      if (inp.id === "context") { setExtendDurationMax(value); rerenderSide(); }
+      else if (inp.id === "ref_video_audio") rerenderSide();
+      return;
+    }
     if (app.id !== "h3-regenerate-2k-ic") {
       if (inp.id === "ref_video_audio") rerenderSide();
       return;
@@ -1236,3 +1270,7 @@ export function workspaceView(appId) {
 /** For the viewer's "Recreate" and the feed's "Try again". */
 export function setTab(tab) { wsTab = tab; }
 export { submit as submitApp, hoverPlay, playWhenVisible, sideResizer };
+
+
+
+

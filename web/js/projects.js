@@ -194,7 +194,7 @@ function manualProjectPanel(p, actions) {
   extendSource.value = options().at(-1)?.id || "";
   const prompt = el("textarea", { rows: "4" }, p.prompt || "Continue the motion, camera and scene.");
   const seconds = el("input", { type: "number", min: "4", max: "7", step: "1", value: "5" });
-  const context = el("select", {}, el("option", { value: "63" }, "63 frames"), el("option", { value: "22" }, "22 frames"), el("option", { value: "5" }, "5 frames"));
+  const context = el("select", {}, el("option", { value: "63" }, "63 frames (2.6 s)"), el("option", { value: "48" }, "48 frames (2 s)"));
   const steps = el("input", { type: "number", min: "1", max: "50", step: "1", value: String(p.config?.steps ?? 8) });
   const seed = el("input", { type: "number", min: "0", max: "2147483647", step: "1", value: String(p.config?.seedBase ?? 42) });
   const enhanceSource = el("select", {}, ...options().map((item) => el("option", { value: item.id }, item.label)));
@@ -604,6 +604,7 @@ export function projectsView() {
     dispose: () => { disposed = true; clearInterval(timer); source.input.onchange = null; for (const f of Object.values(refs)) f.input.onchange = null; },
   };
 }
+
 
 
 

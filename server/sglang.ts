@@ -298,6 +298,12 @@ export class SglangClient {
   }
 
   validate(app: App, values: Values): void {
+    const refCount = ["ref_images", "ref_videos", "ref_audios"]
+      .reduce((count, id) => count + files(values[id]).length, 0);
+    const totalFiles = refCount + (app.adapter === "extend" ? 1 : 0);
+    if (totalFiles > 12) {
+      throw new SglangInputError(`H3 accepts at most 12 reference files including the motion tail; remove ${totalFiles - 12}`);
+    }
     if (app.adapter === "extend") {
       const contextFrames = Number(values.context ?? 39);
       const contextSeconds = Math.max(1, Math.min(120, contextFrames)) / 24;
