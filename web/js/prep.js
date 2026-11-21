@@ -203,6 +203,31 @@ export function prepView() {
     }
   }
 
+  const acceptSourceFiles = (files) => {
+    const file = files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("video/") && !/\.(mp4|mov|mkv|webm|m4v|avi)$/i.test(file.name)) {
+      status.textContent = "Drop a video file to prepare.";
+      status.className = "prep-status err";
+      return;
+    }
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    sourceInput.files = transfer.files;
+    sourceInput.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  sourceButton.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    sourceButton.classList.add("over");
+  });
+  sourceButton.addEventListener("dragleave", () => sourceButton.classList.remove("over"));
+  sourceButton.addEventListener("drop", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    sourceButton.classList.remove("over");
+    acceptSourceFiles(event.dataTransfer.files);
+  });
   sourceInput.addEventListener("change", async () => {
     const file = sourceInput.files?.[0];
     if (!file) return;

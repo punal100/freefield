@@ -79,12 +79,32 @@ function fileDrop({ label, hint, accept, multiple = false, iconName }) {
   const note = el("small", {}, hint);
   const drop = el("label", { class: "drop proj-drop" },
     input, el("span", { class: "ic" }, icon(iconName)), text, note);
+  const acceptFiles = (files) => {
+    const selected = [...files].slice(0, multiple ? undefined : 1);
+    if (!selected.length) return;
+    const transfer = new DataTransfer();
+    for (const file of selected) transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
   input.onchange = () => {
     const files = input.files || [];
     drop.classList.toggle("has", files.length > 0);
     text.textContent = files.length ? `${files.length} ${files.length === 1 ? "file" : "files"} selected` : label;
     note.textContent = files.length ? Array.from(files, (f) => f.name).join(" · ") : hint;
   };
+  drop.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    drop.classList.add("over");
+  });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    drop.classList.remove("over");
+    acceptFiles(event.dataTransfer.files);
+  });
   const reset = () => { input.value = ""; text.textContent = label; note.textContent = hint; drop.classList.remove("has"); };
   return { input, drop, reset };
 }

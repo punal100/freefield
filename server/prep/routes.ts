@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname } from "node:path";
 import { PrepInputError, type PrepService } from "./service.ts";
+import { PrepError } from "./planner.ts";
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
@@ -84,8 +85,9 @@ export async function handlePrep(
     return true;
   } catch (error) {
     const message = error instanceof PrepInputError || error instanceof Error ? error.message : String(error);
-    send(res, error instanceof PrepInputError ? 400 : 500, { error: message });
+    send(res, error instanceof PrepInputError || error instanceof PrepError ? 400 : 500, { error: message });
     return true;
   }
 }
+
 

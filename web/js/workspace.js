@@ -1119,7 +1119,7 @@ function sidebarPanel(app, rerenderSide) {
   const side = el("aside", { class: "side", "aria-label": app.name }, tabs, scroll, foot);
   side.append(sideResizer(side));
   side.addEventListener("dragover", (e) => e.preventDefault());
-  side.addEventListener("drop", (e) => { e.preventDefault(); if (assignFiles(app, e.dataTransfer.files)) rerenderSide(); });
+  side.addEventListener("drop", (e) => { e.preventDefault(); e.stopPropagation(); if (assignFiles(app, e.dataTransfer.files)) rerenderSide(); });
   return side;
 }
 
@@ -1342,6 +1342,16 @@ export function workspaceView(appId) {
     };
     root.append(mainArea(app, layout, disposers));
     drawSide();
+    const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+    const over = (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } };
+    const drop = (e) => {
+      if (!e.dataTransfer?.files?.length) return;
+      e.preventDefault();
+      if (assignFiles(app, e.dataTransfer.files)) drawSide();
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    disposers.push(() => { window.removeEventListener("dragover", over); window.removeEventListener("drop", drop); });
     const paste = (e) => { const files = [...(e.clipboardData?.files || [])]; if (files.length && assignFiles(app, files)) { e.preventDefault(); drawSide(); } };
     document.addEventListener("paste", paste);
     disposers.push(() => document.removeEventListener("paste", paste));
@@ -1352,6 +1362,7 @@ export function workspaceView(appId) {
 /** For the viewer's "Recreate" and the feed's "Try again". */
 export function setTab(tab) { wsTab = tab; }
 export { submit as submitApp, hoverPlay, playWhenVisible, sideResizer };
+
 
 
 
