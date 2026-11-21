@@ -84,7 +84,8 @@ async function validateMediaFiles(app) {
   for (const inp of app.inputs.filter((i) => isMedia(i.type))) {
     const value = form.files[inp.id];
     const items = Array.isArray(value) ? value : value ? [value] : [];
-    files += items.length;
+    const extendSource = app.id === "h3-extend-sglang" && inp.id === "clip";
+    if (!extendSource) files += items.length;
     for (const { file } of items) {
       if (!fileMatches(inp.type, file)) {
         throw new Error(`${inp.label}: ${file.name} — unsupported ${inp.type} format`);
@@ -98,7 +99,7 @@ async function validateMediaFiles(app) {
       if (seconds < min - 0.1 || seconds > max + 0.1) {
         throw new Error(`${inp.label}: ${file.name} is ${seconds.toFixed(1)} s; needs ${min}–${max} s`);
       }
-      totals[inp.type] += seconds;
+      if (!extendSource) totals[inp.type] += seconds;
     }
   }
   const tail = app.id === "h3-extend-sglang" ? Number(form.values.context || 0) / 24 : 0;
@@ -121,11 +122,16 @@ function refBudget(app) {
     for (const inp of app.inputs.filter((i) => isMedia(i.type))) {
       const value = form.files[inp.id];
       const items = Array.isArray(value) ? value : value ? [value] : [];
-      counts[inp.type] += items.length;
-      files += items.length;
+      const extendSource = app.id === "h3-extend-sglang" && inp.id === "clip";
+      if (!extendSource) {
+        counts[inp.type] += items.length;
+        files += items.length;
+      }
       if (inp.type !== "video" && inp.type !== "audio") continue;
       for (const { file } of items) {
-        try { totals[inp.type] += await mediaSeconds(file, inp.type); } catch { /* unreadable files are reported on submit */ }
+        try {
+          if (!extendSource) totals[inp.type] += await mediaSeconds(file, inp.type);
+        } catch { /* unreadable files are reported on submit */ }
       }
     }
     const tail = app.id === "h3-extend-sglang" ? Number(form.values.context || 0) / 24 : 0;
@@ -1364,6 +1370,9 @@ export function workspaceView(appId) {
 /** For the viewer's "Recreate" and the feed's "Try again". */
 export function setTab(tab) { wsTab = tab; }
 export { submit as submitApp, hoverPlay, playWhenVisible, sideResizer };
+
+
+
 
 
 
