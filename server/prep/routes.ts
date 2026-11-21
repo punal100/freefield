@@ -49,6 +49,10 @@ export async function handlePrep(
       send(res, 200, service.capabilityResult());
       return true;
     }
+    if (req.method === "POST" && parts.length === 3 && parts[2] === "capabilities") {
+      send(res, 200, service.setCapabilities(await json(req, 2 ** 20)));
+      return true;
+    }
     if (req.method === "POST" && parts.length === 3 && parts[2] === "analyze") {
       const name = url.searchParams.get("name") || "source";
       const source = await service.analyze(req, name);
@@ -84,3 +88,4 @@ export async function handlePrep(
     return true;
   }
 }
+

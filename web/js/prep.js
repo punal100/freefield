@@ -46,6 +46,10 @@ export function prepView() {
 
   function drawFields() {
     fields.replaceChildren(...[
+      mode.value === "enhance"
+        ? el("div", { class: "prep-mode-note" }, icon("scissors"),
+          el("p", {}, "Exports every valid enhancement window. Window size, overlap, and source coverage come from the capability document."))
+        : null,
       mode.value === "extend"
         ? el("label", { class: "field" }, el("span", { class: "lbl" }, "Motion context"),
           context,
@@ -83,6 +87,43 @@ export function prepView() {
     return rows;
   }
 
+  function applyCapabilities() {
+    if (!prep.value?.available) { planButton.disabled = true; drawCapabilities(); return; }
+    if (prep.value.extend) {
+      context.min = String(prep.value.extend.contextFrames.min);
+      context.max = String(prep.value.extend.contextFrames.max);
+    }
+    planButton.disabled = false;
+    drawCapabilities();
+    if (source.value) drawPlan();
+  }
+
+  function loadCapabilityButton() {
+    const input = el("input", { type: "file", accept: "application/json,.json", hidden: "" });
+    const button = el("button", { class: "btn ghost small", type: "button", onclick: () => input.click() }, icon("upload"), "Load capability document");
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      status.textContent = "Loading capability document…";
+      status.className = "prep-status";
+      try {
+        const text = await file.text();
+        JSON.parse(text);
+        const res = await fetch("/api/prep/capabilities", { method: "POST", headers: { "content-type": "application/json" }, body: text });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
+        prep.value = body;
+        applyCapabilities();
+        status.textContent = body.available ? "Capability document loaded." : `Capability rejected: ${body.reason}`;
+        status.className = `prep-status${body.available ? "" : " err"}`;
+      } catch (error) {
+        status.textContent = error.message;
+        status.className = "prep-status err";
+      }
+    });
+    return el("div", { class: "prep-load" }, button, input);
+  }
+
   function drawCapabilities() {
     const content = [];
     const gpuState = gpu.value ? (gpu.value.available ? "live profile" : gpu.value.source === "official" ? "official fallback" : "unavailable") : "loading";
@@ -95,6 +136,8 @@ export function prepView() {
         el("b", {}, "Prep unavailable"),
         el("p", {}, prep.value.reason),
         prep.value.missing?.length ? el("code", {}, prep.value.missing.join(", ")) : null));
+      content.push(loadCapabilityButton());
+      content.push(el("p", { class: "prep-help" }, "Or configure FREEFIELD_PREP_CAPABILITIES_FILE / FREEFIELD_PREP_CAPABILITIES."));
     }
     if (!prep.value) content.push(el("p", { class: "prep-help" }, "Reading capability document…"));
     capsHost.replaceChildren(...content);
@@ -254,4 +297,5 @@ export function prepView() {
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
 

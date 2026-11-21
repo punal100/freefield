@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { receive } from "../projects/assets.ts";
-import { loadCapabilities, type PrepCapabilities } from "./capabilities.ts";
+import { loadCapabilities, validateCapabilities, type PrepCapabilities } from "./capabilities.ts";
 import {
   planEnhanceWindows,
   planExtensionSegments,
@@ -164,7 +164,7 @@ export class PrepService {
   readonly root: string;
   private readonly sources = new Map<string, PrepSource>();
   private readonly exports = new Map<string, PrepExportResult>();
-  private readonly capabilities: PrepCapabilitiesResult;
+  private capabilities: PrepCapabilitiesResult;
 
   constructor(root: string) {
     this.root = root;
@@ -173,6 +173,11 @@ export class PrepService {
   }
 
   capabilityResult() { return this.capabilities; }
+
+  setCapabilities(raw: unknown): PrepCapabilitiesResult {
+    this.capabilities = validateCapabilities(raw);
+    return this.capabilities;
+  }
 
   private capability(): PrepCapabilities {
     if (!this.capabilities.available) throw new PrepInputError(`prep capabilities unavailable: ${(this.capabilities as { reason: string }).reason}`);
@@ -285,4 +290,5 @@ export class PrepService {
 }
 
 type PrepCapabilitiesResult = ReturnType<typeof loadCapabilities>;
+
 
