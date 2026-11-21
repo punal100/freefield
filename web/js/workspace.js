@@ -104,7 +104,8 @@ async function validateMediaFiles(app) {
   const tail = app.id === "h3-extend-sglang" ? Number(form.values.context || 0) / 24 : 0;
   totals.video += tail;
   const mixed = files + (tail ? 1 : 0);
-  if (mixed > 12) throw new Error(`H3 accepts at most 12 reference files including the motion tail; remove ${mixed - 12}`);
+  const maxFiles = app.backend === "sglang" ? Math.min(12, Number(h3CapsSync().max_refs) || 12) : 12;
+  if (mixed > maxFiles) throw new Error(`This H3 profile admits at most ${maxFiles} reference files including the motion tail; remove ${mixed - maxFiles}`);
   for (const [kind, total] of Object.entries(totals)) {
     if (total > 15.1) throw new Error(`Reference ${kind}: ${total.toFixed(1)} s total; the maximum is 15 s${kind === "video" && tail ? " including the motion tail" : ""}`);
   }
@@ -133,9 +134,10 @@ function refBudget(app) {
     const problems = [];
     if (video > 15.1) problems.push(`video ${video.toFixed(1)}/15 s`);
     if (totals.audio > 15.1) problems.push(`audio ${totals.audio.toFixed(1)}/15 s`);
-    if (mixed > 12) problems.push(`${mixed}/12 files`);
+    const maxFiles = Math.min(12, Number(h3CapsSync().max_refs) || 12);
+    if (mixed > maxFiles) problems.push(`${mixed}/${maxFiles} files`);
     if (counts.audio > 0 && counts.image === 0 && counts.video === 0 && !tail) problems.push("audio needs an image or video reference");
-    box.textContent = `Reference budgets — Video ${video.toFixed(1)}/15 s${tail ? ` (incl. ${tail.toFixed(1)} s tail)` : ""} · Audio ${totals.audio.toFixed(1)}/15 s · Files ${mixed}/12`;
+    box.textContent = `Reference budgets — Video ${video.toFixed(1)}/15 s${tail ? ` (incl. ${tail.toFixed(1)} s tail)` : ""} · Audio ${totals.audio.toFixed(1)}/15 s · Files ${mixed}/${maxFiles}`;
     if (problems.length) box.textContent += ` — WARNING: ${problems.join(" · ")}`;
     box.style.color = problems.length ? "var(--warn, #e5a50a)" : "";
   };
@@ -1362,6 +1364,8 @@ export function workspaceView(appId) {
 /** For the viewer's "Recreate" and the feed's "Try again". */
 export function setTab(tab) { wsTab = tab; }
 export { submit as submitApp, hoverPlay, playWhenVisible, sideResizer };
+
+
 
 
 
