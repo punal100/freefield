@@ -7,7 +7,7 @@ import {
   planExtensionTail,
   PrepError,
 } from "../server/prep/planner.ts";
-import { validateCapabilities } from "../server/prep/capabilities.ts";
+import { loadCapabilities, validateCapabilities } from "../server/prep/capabilities.ts";
 
 test("enhance windows follow the supplied capability and pin the final window", () => {
   const windows = planEnhanceWindows({
@@ -107,4 +107,20 @@ test("capability validation reports missing values instead of defaulting", () =>
   const result = validateCapabilities({ source: { fps: 24, dimensions: null, audio: "optional" } });
   assert.equal(result.available, false);
   if (!result.available) assert.ok(result.missing.includes("enhance"));
+});
+
+test("loadCapabilities auto-detects the H3 prep profile when unset", () => {
+  const result = loadCapabilities({});
+  assert.equal(result.available, true);
+  if (result.available) {
+    assert.equal(result.authority, "auto:h3-ref2va");
+    assert.equal(result.source.fps, 24);
+    assert.equal(result.enhance?.windowFrames, 124);
+    assert.deepEqual(result.extend?.contextFrames, { min: 48, max: 360 });
+  }
+});
+
+test("an explicit invalid override fails instead of falling back", () => {
+  const result = loadCapabilities({ FREEFIELD_PREP_CAPABILITIES: "{" });
+  assert.equal(result.available, false);
 });

@@ -190,10 +190,12 @@ export class PrepService {
     const folder = join(this.root, id);
     mkdirSync(folder, { recursive: true });
     const path = join(folder, `source${extname(filename) || ".video"}`);
-    const limit = Number(process.env.FREEFIELD_PREP_MAX_UPLOAD_MB) * 2 ** 20;
+    const configuredLimit = process.env.FREEFIELD_PREP_MAX_UPLOAD_MB;
+    const limitMb = configuredLimit === undefined || configuredLimit === "" ? 2048 : Number(configuredLimit);
+    const limit = limitMb * 2 ** 20;
     if (!Number.isFinite(limit) || limit <= 0) {
       rmSync(folder, { recursive: true, force: true });
-      throw new PrepInputError("FREEFIELD_PREP_MAX_UPLOAD_MB must be configured");
+      throw new PrepInputError("FREEFIELD_PREP_MAX_UPLOAD_MB must be a positive number");
     }
     await receive(req, path, limit);
     const probe = await probeSource(path);
@@ -290,5 +292,6 @@ export class PrepService {
 }
 
 type PrepCapabilitiesResult = ReturnType<typeof loadCapabilities>;
+
 
 

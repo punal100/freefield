@@ -1086,7 +1086,6 @@ dl.vals dd { margin: 0; overflow-wrap: anywhere; }
 }
 
 
-.prep-load { display: flex; align-items: center; gap: 8px; }
 .prep-mode-note { display: flex; gap: 9px; align-items: flex-start; padding: 10px; border: 1px solid #25252a; border-radius: 10px; background: #111113; color: var(--dim); }
 .prep-mode-note svg { width: 16px; height: 16px; flex: none; color: var(--accent); margin-top: 2px; }
 .prep-mode-note p { margin: 0; font-size: 11.5px; line-height: 1.45; }
@@ -1115,4 +1114,5 @@ dl.vals dd { margin: 0; overflow-wrap: anywhere; }
 .prep-field-pair .frame-control { grid-template-columns: 32px minmax(0, 1fr) 32px; }
 .prep-field-pair .frame-input { font-size: 15px; }
 .prep-field-pair .frame-step { font-size: 17px; }
+
 

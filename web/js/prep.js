@@ -1,4 +1,4 @@
-// Long-video preparation: every cut limit comes from capability documents.
+// Long-video preparation: limits come from the active prep capability profile.
 import { api, el, icon, toast } from "./util.js";
 import { frameStepper, sideResizer } from "./workspace.js";
 
@@ -89,6 +89,8 @@ export function prepView() {
       }
     }
     if (prep.value?.available) {
+      rows.push(metaRow("Authority", prep.value.authority));
+      rows.push(metaRow("Source fps", prep.value.source.fps === null ? "source probe" : `${prep.value.source.fps} fps`));
       if (prep.value.enhance) {
         rows.push(metaRow("Enhance window", `${prep.value.enhance.windowFrames} frames`));
         rows.push(metaRow("Window overlap", `${prep.value.enhance.overlapFrames} frames`));
@@ -115,32 +117,6 @@ export function prepView() {
     if (source.value) drawPlan();
   }
 
-  function loadCapabilityButton() {
-    const input = el("input", { type: "file", accept: "application/json,.json", hidden: "" });
-    const button = el("button", { class: "btn ghost small", type: "button", onclick: () => input.click() }, icon("upload"), "Load capability document");
-    input.addEventListener("change", async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      status.textContent = "Loading capability document…";
-      status.className = "prep-status";
-      try {
-        const text = await file.text();
-        JSON.parse(text);
-        const res = await fetch("/api/prep/capabilities", { method: "POST", headers: { "content-type": "application/json" }, body: text });
-        const body = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
-        prep.value = body;
-        applyCapabilities();
-        status.textContent = body.available ? "Capability document loaded." : `Capability rejected: ${body.reason}`;
-        status.className = `prep-status${body.available ? "" : " err"}`;
-      } catch (error) {
-        status.textContent = error.message;
-        status.className = "prep-status err";
-      }
-    });
-    return el("div", { class: "prep-load" }, button, input);
-  }
-
   function drawCapabilities() {
     const content = [];
     const gpuState = gpu.value ? (gpu.value.available ? "live profile" : gpu.value.source === "official" ? "official fallback" : "unavailable") : "loading";
@@ -153,8 +129,7 @@ export function prepView() {
         el("b", {}, "Prep unavailable"),
         el("p", {}, prep.value.reason),
         prep.value.missing?.length ? el("code", {}, prep.value.missing.join(", ")) : null));
-      content.push(loadCapabilityButton());
-      content.push(el("p", { class: "prep-help" }, "Or configure FREEFIELD_PREP_CAPABILITIES_FILE / FREEFIELD_PREP_CAPABILITIES."));
+      content.push(el("p", { class: "prep-help" }, "This server has no valid prep profile. An operator must fix its startup configuration; there is nothing for a viewer to upload."));
     }
     if (!prep.value) content.push(el("p", { class: "prep-help" }, "Reading capability document…"));
     capsHost.replaceChildren(...content);
@@ -171,7 +146,7 @@ export function prepView() {
     if (!prep.value?.available) {
       resultBox.append(el("div", { class: "prep-empty" },
         el("b", {}, "Preparation is gated"),
-        el("p", {}, "A complete capability document is required before cuts can be planned.")));
+        el("p", {}, "The active server prep profile is unavailable, so cuts cannot be planned.")));
       return;
     }
     if (mode.value === "enhance" && !prep.value.enhance) {
@@ -311,6 +286,9 @@ export function prepView() {
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
+
+
 
 
 

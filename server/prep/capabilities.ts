@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { FPS, IC_OVERLAP_FRAMES, IC_WINDOW_FRAMES, MAX_H3_SECONDS, MIN_H3_SECONDS } from "../projects/planner.ts";
 
 export type FrameBudget = { min: number; max: number };
 
@@ -145,9 +146,30 @@ export function validateCapabilities(raw: unknown): PrepCapabilitiesResult {
   };
 }
 
+/**
+ * H3 Ref2VA/IC contract used when no operator override is configured.
+ * Values are the same 24 fps / 124-frame IC / 4-15 s H3 limits used by the
+ * H3 planner and media adapters, not per-request guesses.
+ */
+export const AUTO_H3_CAPABILITIES = validateCapabilities({
+  authority: "auto:h3-ref2va",
+  source: { fps: FPS, dimensions: null, audio: "optional" },
+  enhance: {
+    windowFrames: IC_WINDOW_FRAMES,
+    overlapFrames: IC_OVERLAP_FRAMES,
+    minSourceFrames: IC_WINDOW_FRAMES,
+  },
+  extend: {
+    contextFrames: { min: FPS * 2, max: FPS * MAX_H3_SECONDS },
+    requestFrames: { min: FPS * MIN_H3_SECONDS, max: FPS * MAX_H3_SECONDS },
+  },
+  export: { videoCodec: "libx264", audioCodec: "aac", pixelFormat: "yuv420p", container: "mp4" },
+});
+
 export function loadCapabilities(env: NodeJS.ProcessEnv = process.env): PrepCapabilitiesResult {
   const inline = env.FREEFIELD_PREP_CAPABILITIES;
   const file = env.FREEFIELD_PREP_CAPABILITIES_FILE;
+  if (!inline && !file) return AUTO_H3_CAPABILITIES;
   let raw: unknown = null;
   if (inline) {
     try { raw = JSON.parse(inline); } catch { return { available: false, reason: "FREEFIELD_PREP_CAPABILITIES is not valid JSON", authority: null, missing: [] }; }
@@ -157,5 +179,6 @@ export function loadCapabilities(env: NodeJS.ProcessEnv = process.env): PrepCapa
   }
   return validateCapabilities(raw);
 }
+
 
 
