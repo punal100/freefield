@@ -476,6 +476,7 @@ export function frameStepper(box, { readout = null } = {}) {
     box.value = String(next);
     syncRail();
     box.dispatchEvent(new Event("input", { bubbles: true }));
+    box.dispatchEvent(new CustomEvent("framecommit", { bubbles: true }));
   };
   const minus = el("button", { class: "frame-step", type: "button", "aria-label": "Decrease frames", onclick: () => commit(Number(box.value) - step) }, "−");
   const plus = el("button", { class: "frame-step", type: "button", "aria-label": "Increase frames", onclick: () => commit(Number(box.value) + step) }, "+");
@@ -489,6 +490,7 @@ export function frameStepper(box, { readout = null } = {}) {
       paintRail();
       box.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    rail.addEventListener("change", () => box.dispatchEvent(new CustomEvent("framecommit", { bubbles: true })));
     syncRail();
   }
   return el("div", { class: "frame-stepper" },
@@ -905,9 +907,15 @@ function sideField(app, inp, f, ui, onChange = null) {
     frameSeconds.textContent = Number.isFinite(frames) && frames > 0 ? `${(frames / frameRate).toFixed(3)} s` : "";
   };
   box.addEventListener("input", () => {
+    if (frameSeconds) {
+      f.values[inp.id] = box.value === "" ? "" : Number(box.value);
+      persistSoon();
+      paintSeconds();
+      return;
+    }
     set(inp.type === "number" ? (box.value === "" ? "" : Number(box.value)) : box.value);
-    paintSeconds();
   });
+  if (frameSeconds) box.addEventListener("framecommit", () => onChange?.(inp, f.values[inp.id]));
   paintSeconds();
   const label = el("span", { class: "lbl" }, inp.label, inp.required ? null : el("small", {}, t("ws.optional")));
   if (frameSeconds) return el("div", { class: "field" }, label, frameStepper(box, { readout: frameSeconds }), help);
@@ -1344,6 +1352,7 @@ export function workspaceView(appId) {
 /** For the viewer's "Recreate" and the feed's "Try again". */
 export function setTab(tab) { wsTab = tab; }
 export { submit as submitApp, hoverPlay, playWhenVisible, sideResizer };
+
 
 
 
