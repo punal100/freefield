@@ -1,5 +1,6 @@
 // Long-video preparation: every cut limit comes from capability documents.
 import { api, el, icon, toast } from "./util.js";
+import { sideResizer } from "./workspace.js";
 
 function seconds(value) {
   return value === null || value === undefined ? "unknown" : `${Number(value).toFixed(3)} s`;
@@ -226,18 +227,20 @@ export function prepView() {
   planButton.disabled = true;
   drawCapabilities();
 
+  const side = el("aside", { class: "side prep-side" },
+    el("div", { class: "side-scroll prep-side-scroll" },
+      el("section", { class: "prep-card" },
+        el("div", { class: "prep-cap-head" }, el("span", { class: "proj-kicker" }, "SOURCE"), el("span", { class: "tag ghost" }, "01")),
+        sourceButton, sourceInput, sourceMeta),
+      el("section", { class: "prep-card" },
+        el("div", { class: "prep-cap-head" }, el("span", { class: "proj-kicker" }, "MODE"), el("span", { class: "tag ghost" }, "02")),
+        el("div", { class: "seg modes prep-mode-seg" }, ...modeButtons),
+        fields),
+      el("section", { class: "prep-card prep-cap-card" }, capsHost)),
+    el("div", { class: "side-foot prep-side-foot" }, planButton, status));
+  side.append(sideResizer(side));
   const node = el("div", { class: "ws l-sidebar prep-ws" },
-    el("aside", { class: "side prep-side" },
-      el("div", { class: "side-scroll prep-side-scroll" },
-        el("section", { class: "prep-card" },
-          el("div", { class: "prep-cap-head" }, el("span", { class: "proj-kicker" }, "SOURCE"), el("span", { class: "tag ghost" }, "01")),
-          sourceButton, sourceInput, sourceMeta),
-        el("section", { class: "prep-card" },
-          el("div", { class: "prep-cap-head" }, el("span", { class: "proj-kicker" }, "MODE"), el("span", { class: "tag ghost" }, "02")),
-          el("div", { class: "seg modes prep-mode-seg" }, ...modeButtons),
-          fields),
-        el("section", { class: "prep-card prep-cap-card" }, capsHost)),
-      el("div", { class: "side-foot prep-side-foot" }, planButton, status)),
+    side,
     el("div", { class: "ws-main prep-main-col" },
       el("header", { class: "prep-head" },
         el("span", { class: "proj-kicker" }, "H3 / PREP"),
@@ -251,3 +254,4 @@ export function prepView() {
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
