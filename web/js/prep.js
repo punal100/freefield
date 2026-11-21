@@ -31,25 +31,14 @@ export function prepView() {
 
   const context = el("input", { type: "number", placeholder: "frames" });
   const contextSeconds = el("small", { class: "frame-seconds" });
-  const visible = el("input", { type: "number", placeholder: "frames (optional)" });
-  const target = el("input", { type: "number", placeholder: "frames (optional)" });
-  const frameSummary = el("p", { class: "prep-frame-summary" });
   const syncFrameSeconds = () => {
     const fps = Number(source.value?.probe?.fps ?? prep.value?.source?.fps);
     const contextFrames = Number(context.value);
     contextSeconds.textContent = Number.isFinite(fps) && fps > 0 && Number.isFinite(contextFrames) && contextFrames > 0
       ? `${(contextFrames / fps).toFixed(3)} s`
       : "";
-    const parts = [["context", context], ["visible", visible], ["target", target]]
-      .map(([name, input]) => {
-        const frames = Number(input.value);
-        return Number.isFinite(frames) && frames > 0
-          ? `${name} ${frames}f${Number.isFinite(fps) && fps > 0 ? ` = ${(frames / fps).toFixed(3)}s` : ""}`
-          : null;
-      }).filter(Boolean);
-    frameSummary.textContent = Number.isFinite(fps) && fps > 0 ? `At ${fps} fps${parts.length ? ` · ${parts.join(" · ")}` : ""}` : "";
   };
-  [context, visible, target].forEach((input) => input.addEventListener("input", syncFrameSeconds));
+  context.addEventListener("input", syncFrameSeconds);
   const planButton = el("button", { class: "btn lime prep-plan-btn", type: "button", onclick: () => drawPlan(true) },
     icon("check"), "Validate plan");
   const modeButtons = ["enhance", "extend"].map((id) => {
@@ -84,13 +73,7 @@ export function prepView() {
           el("p", { class: "help" }, extendRange))
         : null,
       mode.value === "extend"
-        ? el("div", { class: "prep-field-pair" },
-          el("div", { class: "field" }, el("span", { class: "lbl" }, "Visible", el("small", {}, "plan only")), frameStepper(visible)),
-          el("div", { class: "field" }, el("span", { class: "lbl" }, "Target", el("small", {}, "plan only")), frameStepper(target)))
-        : null,
-      mode.value === "extend" ? frameSummary : null,
-      mode.value === "extend"
-        ? el("p", { class: "prep-help" }, "Visible and target only preview the chain length. Export writes the tail clip; it does not generate segments.")
+        ? el("p", { class: "prep-help" }, "This exports one tail clip. H3 Extend generates the continuation and handles the chain.")
         : null,
     ].filter(Boolean));
   }
@@ -204,8 +187,6 @@ export function prepView() {
       if (mode.value === "extend") {
         if (!context.value) throw new Error("Motion context is required");
         body.contextFrames = Number(context.value);
-        if (target.value) body.targetFrames = Number(target.value);
-        if (visible.value) body.visibleFrames = Number(visible.value);
       }
       const plan = await api("/api/prep/plan", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
@@ -221,10 +202,6 @@ export function prepView() {
             el("span", { class: "prep-plan-index" }, "TAIL"),
             el("b", {}, `${plan.tail.startFrame} → ${plan.tail.endFrame}`),
             el("small", {}, `${plan.tail.frames} frames`)),
-          ...(plan.segments || []).map((s) => el("div", { class: "prep-plan-row" },
-            el("span", { class: "prep-plan-index" }, String(s.index + 1).padStart(2, "0")),
-            el("b", {}, `${s.startFrame} → ${s.endFrame}`),
-            el("small", {}, `visible ${s.visibleFrames} · request ${s.requestFrames} frames`))),
         ];
       const exportButton = el("button", { class: "btn lime", type: "button", onclick: async () => {
         status.textContent = "Exporting…";
@@ -334,6 +311,7 @@ export function prepView() {
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
 
 
 
