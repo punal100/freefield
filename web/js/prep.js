@@ -1,6 +1,6 @@
 // Long-video preparation: every cut limit comes from capability documents.
 import { api, el, icon, toast } from "./util.js";
-import { sideResizer } from "./workspace.js";
+import { frameStepper, sideResizer } from "./workspace.js";
 
 function seconds(value) {
   return value === null || value === undefined ? "unknown" : `${Number(value).toFixed(3)} s`;
@@ -79,14 +79,14 @@ export function prepView() {
             el("b", {}, "Export a motion tail"),
             el("p", {}, "Exports only the final tail for H3 Extend. Prompt, references, and generation settings stay in the H3 Extend app. ", el("a", { class: "more", href: "#/app/h3-extend-sglang" }, "Open H3 Extend", icon("chevR"))))),
       mode.value === "extend"
-        ? el("label", { class: "field" }, el("span", { class: "lbl" }, "Motion context", el("small", {}, "required")),
-          context, contextSeconds,
+        ? el("div", { class: "field" }, el("span", { class: "lbl" }, "Motion context", el("small", {}, "required")),
+          frameStepper(context, { readout: contextSeconds }),
           el("p", { class: "help" }, extendRange))
         : null,
       mode.value === "extend"
         ? el("div", { class: "prep-field-pair" },
-          el("label", { class: "field" }, el("span", { class: "lbl" }, "Visible", el("small", {}, "plan only")), visible),
-          el("label", { class: "field" }, el("span", { class: "lbl" }, "Target", el("small", {}, "plan only")), target))
+          el("div", { class: "field" }, el("span", { class: "lbl" }, "Visible", el("small", {}, "plan only")), frameStepper(visible)),
+          el("div", { class: "field" }, el("span", { class: "lbl" }, "Target", el("small", {}, "plan only")), frameStepper(target)))
         : null,
       mode.value === "extend" ? frameSummary : null,
       mode.value === "extend"
@@ -126,6 +126,8 @@ export function prepView() {
       context.max = String(prep.value.extend.contextFrames.max);
     }
     planButton.disabled = false;
+    syncFrameSeconds();
+    drawFields();
     drawCapabilities();
     if (source.value) drawPlan();
   }
@@ -294,6 +296,7 @@ export function prepView() {
     } else {
       planButton.disabled = true;
     }
+    drawFields();
     drawCapabilities();
     drawPlan();
   }).catch((error) => {
@@ -331,6 +334,8 @@ export function prepView() {
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
+
 
 
 

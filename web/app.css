@@ -1027,7 +1027,7 @@ dl.vals dd { margin: 0; overflow-wrap: anywhere; }
 .prep-mode-seg { display: grid; grid-template-columns: 1fr 1fr; }
 .prep-mode-seg button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 .prep-fields { display: grid; gap: 10px; }
-.prep-field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.prep-field-pair { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .prep-card .field { background: #101012; border-color: #242428; padding: 10px; }
 .prep-cap-card { background: #101012; }
 .prep-caps { display: grid; gap: 8px; }
@@ -1097,3 +1097,22 @@ dl.vals dd { margin: 0; overflow-wrap: anywhere; }
 .prep-mode-intro p { margin: 4px 0 0; color: var(--dim); font-size: 11.5px; line-height: 1.45; }
 .frame-seconds { color: var(--accent); font: 600 11.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: -3px; }
 .prep-frame-summary { color: var(--accent); font: 600 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 7px 0 0; }
+
+.frame-stepper { display: grid; gap: 6px; }
+.frame-head { display: flex; align-items: center; gap: 10px; }
+.frame-control { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: stretch; min-width: 0; flex: 1; border: 1px solid #2a2a30; border-radius: 11px; background: #0d0d0f; overflow: hidden; }
+.frame-control:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.frame-input { width: 100%; min-width: 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); text-align: center; font: 700 18px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0; appearance: textfield; -moz-appearance: textfield; }
+.frame-input:focus { outline: 0; }
+.frame-input::-webkit-outer-spin-button, .frame-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.frame-step { display: grid; place-items: center; border: 0; background: #18181c; color: var(--ink); font: 500 21px/1 system-ui, sans-serif; cursor: pointer; transition: background .15s, color .15s; }
+.frame-step:hover { background: var(--panel-3); color: var(--accent); }
+.frame-step:active { background: var(--accent-soft); }
+.frame-readout, .frame-head > .frame-seconds { min-width: 68px; text-align: right; font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); white-space: nowrap; }
+.frame-rail-wrap { display: grid; gap: 1px; padding: 0 2px; }
+.frame-bounds { display: flex; justify-content: space-between; color: var(--faint); font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.prep-field-pair .frame-head { gap: 7px; }
+.prep-field-pair .frame-control { grid-template-columns: 32px minmax(0, 1fr) 32px; }
+.prep-field-pair .frame-input { font-size: 15px; }
+.prep-field-pair .frame-step { font-size: 17px; }
+

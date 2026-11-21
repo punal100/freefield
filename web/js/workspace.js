@@ -448,6 +448,56 @@ function galleryField(app, inp, f, set, help) {
   return el("div", { class: "field" }, el("span", { class: "lbl" }, inp.label), row, now, help);
 }
 
+export function frameStepper(box, { readout = null } = {}) {
+  const min = box.min === "" ? 0 : Number(box.min);
+  const max = box.max === "" ? null : Number(box.max);
+  const step = Number(box.step) || 1;
+  const hasRail = max !== null && Number.isFinite(min) && Number.isFinite(max) && max > min;
+  const clampValue = (value) => {
+    let next = Math.round(Number(value));
+    if (!Number.isFinite(next)) next = Number(box.value) || min;
+    next = Math.max(Number.isFinite(min) ? min : next, next);
+    if (hasRail) next = Math.min(max, next);
+    return next;
+  };
+  const rail = hasRail ? el("input", { type: "range", class: "frame-rail", min, max, step, "aria-label": `${box.getAttribute("aria-label") || "Frames"} slider` }) : null;
+  const paintRail = () => {
+    if (!rail) return;
+    rail.style.setProperty("--p", `${((Number(rail.value) - min) / (max - min || 1)) * 100}%`);
+  };
+  const syncRail = () => {
+    if (!rail) return;
+    const value = Number(box.value);
+    if (Number.isFinite(value)) rail.value = String(Math.min(max, Math.max(min, value)));
+    paintRail();
+  };
+  const commit = (value) => {
+    const next = clampValue(value);
+    box.value = String(next);
+    syncRail();
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const minus = el("button", { class: "frame-step", type: "button", "aria-label": "Decrease frames", onclick: () => commit(Number(box.value) - step) }, "−");
+  const plus = el("button", { class: "frame-step", type: "button", "aria-label": "Increase frames", onclick: () => commit(Number(box.value) + step) }, "+");
+  box.classList.add("frame-input");
+  box.setAttribute("inputmode", "numeric");
+  box.addEventListener("input", syncRail);
+  box.addEventListener("change", () => { if (box.value !== "") commit(box.value); });
+  if (rail) {
+    rail.addEventListener("input", () => {
+      box.value = rail.value;
+      paintRail();
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    syncRail();
+  }
+  return el("div", { class: "frame-stepper" },
+    el("div", { class: "frame-head" },
+      el("div", { class: "frame-control" }, minus, box, plus),
+      readout),
+    rail ? el("div", { class: "frame-rail-wrap" }, rail, el("div", { class: "frame-bounds" }, el("small", {}, String(min)), el("small", {}, String(max)))) : null);
+}
+
 function rangeInput(inp, value, onChange) {
   const out = el("b", {}, String(value));
   const r = el("input", { type: "range", min: inp.min ?? 0, max: inp.max ?? 100, step: inp.step ?? 1, value: value, "aria-label": inp.label });
@@ -859,7 +909,9 @@ function sideField(app, inp, f, ui, onChange = null) {
     paintSeconds();
   });
   paintSeconds();
-  return el("label", { class: "field" }, el("span", { class: "lbl" }, inp.label, inp.required ? null : el("small", {}, t("ws.optional"))), box, frameSeconds, help);
+  const label = el("span", { class: "lbl" }, inp.label, inp.required ? null : el("small", {}, t("ws.optional")));
+  if (frameSeconds) return el("div", { class: "field" }, label, frameStepper(box, { readout: frameSeconds }), help);
+  return el("label", { class: "field" }, label, box, help);
 }
 
 const isAdvanced = (inp) => inp.type === "seed" || /negative/.test(inp.id);
@@ -1292,6 +1344,7 @@ export function workspaceView(appId) {
 /** For the viewer's "Recreate" and the feed's "Try again". */
 export function setTab(tab) { wsTab = tab; }
 export { submit as submitApp, hoverPlay, playWhenVisible, sideResizer };
+
 
 
 
