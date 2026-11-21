@@ -45,20 +45,33 @@ export function prepView() {
   });
 
   function drawFields() {
+    const extendRange = prep.value?.extend
+      ? `Allowed context: ${prep.value.extend.contextFrames.min}–${prep.value.extend.contextFrames.max} frames.`
+      : "Load a capability document to see the allowed context range.";
     fields.replaceChildren(...[
       mode.value === "enhance"
-        ? el("div", { class: "prep-mode-note" }, icon("scissors"),
-          el("p", {}, "Exports every valid enhancement window. Window size, overlap, and source coverage come from the capability document."))
-        : null,
+        ? el("div", { class: "prep-mode-intro" },
+          el("span", { class: "prep-mode-ic" }, icon("scissors")),
+          el("div", {},
+            el("b", {}, "Export enhancement windows"),
+            el("p", {}, "Splits the source into the IC capability's windows. Window size, overlap, source coverage, fps, and audio rules come from the capability document.")))
+        : el("div", { class: "prep-mode-intro" },
+          el("span", { class: "prep-mode-ic" }, icon("sliders")),
+          el("div", {},
+            el("b", {}, "Export a motion tail"),
+            el("p", {}, "Exports only the final tail for H3 Extend. Prompt, references, and generation settings stay in the H3 Extend app. ", el("a", { class: "more", href: "#/app/h3-extend-sglang" }, "Open H3 Extend", icon("chevR"))))),
       mode.value === "extend"
-        ? el("label", { class: "field" }, el("span", { class: "lbl" }, "Motion context"),
+        ? el("label", { class: "field" }, el("span", { class: "lbl" }, "Motion context", el("small", {}, "required")),
           context,
-          el("p", { class: "help" }, "Required. Use the context range from the capability panel."))
+          el("p", { class: "help" }, extendRange))
         : null,
       mode.value === "extend"
         ? el("div", { class: "prep-field-pair" },
-          el("label", { class: "field" }, el("span", { class: "lbl" }, "Visible"), visible),
-          el("label", { class: "field" }, el("span", { class: "lbl" }, "Target"), target))
+          el("label", { class: "field" }, el("span", { class: "lbl" }, "Visible", el("small", {}, "plan only")), visible),
+          el("label", { class: "field" }, el("span", { class: "lbl" }, "Target", el("small", {}, "plan only")), target))
+        : null,
+      mode.value === "extend"
+        ? el("p", { class: "prep-help" }, "Visible and target only preview the chain length. Export writes the tail clip; it does not generate segments.")
         : null,
     ].filter(Boolean));
   }
@@ -297,5 +310,7 @@ export function prepView() {
 
   return { node, active: "video", dispose: () => { disposed = true; } };
 }
+
+
 
 
