@@ -26,7 +26,7 @@ function fmtDuration(seconds) {
 
 function runtimeProgressText(data) {
   const runtime = data.runtime || {};
-  const pct = Math.round((data.progress || 0) * 100);
+  const pct = Math.min(99, Math.round((data.progress || 0) * 100));
   const unit = runtime.active_kind === "segment"
     ? `Segment ${runtime.active_index}/${runtime.active_total}`
     : runtime.active_kind === "window"

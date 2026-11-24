@@ -282,6 +282,12 @@ function wake() {
     .catch((e) => { if (waking === started) waking = { ...started, error: (e as Error).message }; });
 }
 
+function fraction(value: unknown): number {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(0.99, n > 1 ? n / 100 : n);
+}
+
 async function workView(): Promise<unknown> {
   const historyEntries = history.list(undefined, 100).map((entry) => history.view(entry)) as Record<string, any>[];
   const projects = getProjects().list() as Record<string, any>[];
@@ -296,7 +302,7 @@ async function workView(): Promise<unknown> {
   const items: Record<string, any>[] = [];
   for (const entry of historyEntries) {
     const job = entry.job ? jobsById.get(String(entry.job)) : null;
-    const progress = job?.progress != null ? Number(job.progress) / 100 : Number(entry.progress?.value ?? 0);
+    const progress = job?.progress != null ? fraction(job.progress) : fraction(entry.progress?.value ?? 0);
     const rawStatus = String(job?.status ?? entry.status ?? "queued");
     items.push({
       id: entry.id, owner_id: entry.id, app_id: entry.app, app_name: entry.app,
@@ -337,7 +343,7 @@ async function workView(): Promise<unknown> {
       kind: "foreign_job", parent_id: null, job_id: String(job.id), upstream_id: String(job.id),
       status: job.status === "in_progress" ? "running" : job.status === "completed" ? "succeeded" : job.status,
       stage: null, queue_position: queueOrder.get(String(job.id)) ?? null,
-      progress: Number(job.progress ?? 0) / 100, completed: null, total: null, elapsed_seconds: null,
+      progress: fraction(job.progress ?? 0), completed: null, total: null, elapsed_seconds: null,
       eta_seconds: null, started_at: null, finished_at: null, error: job.error ?? null,
       preview_url: null, final_url: null, created_at: new Date(Number(job.created_at ?? 0) * 1000).toISOString(),
     });

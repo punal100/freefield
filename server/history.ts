@@ -46,6 +46,7 @@ export type JobLike = {
   readonly startedAt: Date | null;
   readonly completedAt: Date | null;
   readonly progress?: { value: number; step: number | null; steps: number | null; currentNodeClass: string | null } | null;
+  readonly progressIsFraction?: boolean;
   readonly queuePosition?: number | null;
   readonly stage?: string | null;
   readonly etaSeconds?: number | null;
@@ -333,11 +334,20 @@ export class History {
       }
       if (job.queuePosition !== undefined) live.queue = job.queuePosition ?? live.queue;
       const p = job.progress;
-      if (p && (p.step !== null || (p.value > 0 && p.value > meter.value))) {
+      if (p && job.progressIsFraction) {
+        const value = Math.max(live.progress?.value ?? 0, Math.min(0.99, Math.max(0, p.value)));
+        live.progress = {
+          value,
+          step: p.step,
+          steps: p.steps,
+          node: p.currentNodeClass ?? live.progress?.node ?? null,
+        };
+      } else if (p && (p.step !== null || (p.value > 0 && p.value > meter.value))) {
         // a backend whose poll carries a live snapshot (comfy-api-proxy's does not: 0, 0/0)
         live.progress = meter.feed({ nodes_done: p.value * (info?.nodes ?? 0), nodes_total: info?.nodes ?? 0, step: p.step, steps: p.steps });
         if (p.currentNodeClass) live.progress.node = p.currentNodeClass;
       }
+
     }, 1000);
 
     let waitError: unknown = null;
@@ -460,11 +470,14 @@ export class History {
   view(e: Entry) {
     const base = `/api/history/${e.id}`;
     const live = this.live.get(e.id);
+    const progress = live?.progress
+      ? { ...live.progress, value: e.status === "succeeded" ? 1 : Math.min(0.99, Math.max(0, live.progress.value)) }
+      : null;
     return {
       ...e,
       inputs: e.inputs.map((i) => ({ ...i, url: `${base}/files/${i.file}` })),
       outputs: e.outputs.map((o) => ({ ...o, url: `${base}/files/${o.file}` })),
-      progress: live?.progress ?? null,
+      progress,
       queue: live?.queue ?? null,
       stage: live?.job?.stage ?? e.stage ?? null,
       eta_seconds: live?.job?.etaSeconds ?? null,

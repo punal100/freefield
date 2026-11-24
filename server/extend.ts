@@ -142,7 +142,10 @@ export class ExtendSglangJob implements JobLike {
   get startedAt(): Date | null { return this.inner.startedAt; }
   get completedAt(): Date | null { return this.inner.completedAt; }
   get progress(): JobLike["progress"] { return this.inner.progress; }
+  readonly progressIsFraction = true;
   get queuePosition(): JobLike["queuePosition"] { return this.inner.queuePosition; }
+  get stage(): string | null { return this.inner.stage ?? null; }
+  get etaSeconds(): number | null { return this.inner.etaSeconds ?? null; }
 
   get outputs(): readonly {
     id: string; name: string; type: string; nodeId: string; contentType: string;

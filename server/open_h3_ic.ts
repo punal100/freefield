@@ -15,6 +15,11 @@ type JobData = {
   id?: string;
   status?: string;
   progress?: number | null;
+  stage?: string | null;
+  step?: number | null;
+  steps?: number | null;
+  eta_seconds?: number | null;
+  elapsed_seconds?: number | null;
   error?: unknown;
   created_at?: number | null;
   started_at?: number | null;
@@ -52,6 +57,7 @@ const sleep = (ms: number, signal?: AbortSignal) =>
   });
 
 export class OpenH3IcJob implements JobLike {
+  readonly progressIsFraction = true;
   readonly id: string;
   status = "queued";
   error: { message?: string; class_type?: string | null; node_id?: string | null } | null = null;
@@ -59,6 +65,8 @@ export class OpenH3IcJob implements JobLike {
   completedAt: Date | null = null;
   progress: { value: number; step: number | null; steps: number | null; currentNodeClass: string | null } | null = null;
   queuePosition: number | null = null;
+  stage: string | null = null;
+  etaSeconds: number | null = null;
   private readonly client: OpenH3IcClient;
 
   constructor(client: OpenH3IcClient, id: string, initial?: JobData) {
@@ -70,18 +78,31 @@ export class OpenH3IcJob implements JobLike {
   private apply(data: JobData) {
     const next = statusOf(data.status);
     if (next === "running" || next === "succeeded") this.startedAt ??= new Date();
+    if (typeof data.started_at === "number") this.startedAt = new Date(data.started_at * 1000);
+    if (typeof data.completed_at === "number") this.completedAt = new Date(data.completed_at * 1000);
     this.status = next;
+    if (typeof data.stage === "string" && data.stage) this.stage = data.stage;
+    const step = typeof data.step === "number" && Number.isFinite(data.step) ? data.step : null;
+    const steps = typeof data.steps === "number" && Number.isFinite(data.steps) ? data.steps : null;
     const value = Number(data.progress);
     if (Number.isFinite(value)) {
       this.progress = {
-        value: next === "succeeded" ? 1 : Math.max(0, Math.min(0.99, value)),
-        step: null,
-        steps: null,
+        value: next === "succeeded" ? 1 : Math.max(0, Math.min(0.99, value > 1 ? value / 100 : value)),
+        step,
+        steps,
         currentNodeClass: "Open-H3 IC",
       };
+    } else if (this.progress) {
+      this.progress.step = step;
+      this.progress.steps = steps;
+    }
+    const eta = Number(data.eta_seconds);
+    if (Number.isFinite(eta) && eta >= 0) {
+      this.etaSeconds = this.etaSeconds && eta > this.etaSeconds + 30 ? this.etaSeconds : eta;
     }
     if (TERMINAL.has(next)) {
       this.completedAt ??= new Date();
+      this.etaSeconds = 0;
       if (next !== "succeeded") this.error = { message: messageOf(data) ?? `IC job ${next}` };
     }
   }

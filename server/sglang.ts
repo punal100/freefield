@@ -97,6 +97,7 @@ function denoiseTelemetry(offset = 0): { step: number; steps: number; stepSecond
 
 /** One manager job. The supervisor returns JSON; progress and status are polled. */
 export class SglangJob implements JobLike {
+  readonly progressIsFraction = true;
   readonly id: string;
   status = "queued";
   error: { message?: string; class_type?: string | null; node_id?: string | null } | null = null;
@@ -136,7 +137,7 @@ export class SglangJob implements JobLike {
     const value = Number(data.progress);
     if (Number.isFinite(value)) {
       this.progress = {
-        value: next === "succeeded" ? 1 : Math.max(0, Math.min(0.9, value > 1 ? value / 100 : value)),
+        value: next === "succeeded" ? 1 : Math.max(0, Math.min(0.99, value > 1 ? value / 100 : value)),
         step: null,
         steps: null,
         currentNodeClass: "SGLang",
@@ -158,10 +159,16 @@ export class SglangJob implements JobLike {
       }
       if (this.step !== null && this.steps) {
         const elapsed = this.startedAt ? Math.max(0, (Date.now() - this.startedAt.getTime()) / 1000) : 0;
-        const perStep = this.step > 0 && elapsed > 0 ? elapsed / this.step : this.stepSeconds;
+        const average = this.step > 0 && elapsed > 0 ? elapsed / this.step : this.stepSeconds;
+        const perStep = this.step > 1 && this.stepSeconds ? this.stepSeconds : average;
         if (perStep) {
           const remaining = this.step >= this.steps ? 0 : (this.steps - this.step) * perStep;
-          this.etaSeconds = Math.max(1, Math.round(remaining + 45));
+          const nextEta = Math.max(1, Math.round(remaining + 45));
+          // Do not jump upward when one step is slow or a stage boundary moves;
+          // a real slowdown still shows up as a flat countdown, not a 50-minute bounce.
+          this.etaSeconds = this.etaSeconds && nextEta > this.etaSeconds + 30
+            ? this.etaSeconds
+            : nextEta;
         }
         this.stage = this.step >= this.steps ? "Decoding" : "Denoising";
       }

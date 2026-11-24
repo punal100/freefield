@@ -75,8 +75,9 @@ export function statusText(e) {
   if (e.status === "running") {
     const p = e.progress;
     let s = e.stage || t("status.running");
+    const pct = Math.min(99, Math.round(Math.max(0, Number(p?.value) || 0) * 100));
     if (p?.step && p?.steps) s += ` · ${t("status.step", { a: p.step, b: p.steps })}`;
-    else if (p?.value > 0) s += ` · ${Math.round(p.value * 100)}%`;
+    else if (pct > 0) s += ` · ${pct}%`;
     if (Number(e.eta_seconds) > 0) s += ` · ETA ${fmtSeconds(e.eta_seconds)}`;
     return s;
   }
@@ -132,7 +133,7 @@ function pendingCard(e) {
     title.textContent = statusText(fresh);
     const p = fresh.progress?.value;
     barBox.classList.toggle("indet", !(p > 0));
-    bar.style.width = p > 0 ? `${Math.round(p * 100)}%` : "";
+    bar.style.width = p > 0 ? `${fresh.status === "succeeded" ? 100 : Math.min(99, Math.round(p * 100))}%` : "";
     if (fresh.preview && prev.dataset.src !== fresh.preview) {
       prev.src = fresh.preview;
       prev.dataset.src = fresh.preview;
